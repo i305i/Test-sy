@@ -10,13 +10,14 @@ import {
   UseGuards,
   UseInterceptors,
   UploadedFile,
+  UploadedFiles,
   ParseUUIDPipe,
   HttpCode,
   HttpStatus,
   Res,
   Req,
 } from '@nestjs/common';
-import { FileInterceptor } from '@nestjs/platform-express';
+import { FileInterceptor, FilesInterceptor } from '@nestjs/platform-express';
 import {
   ApiTags,
   ApiOperation,
@@ -27,6 +28,7 @@ import {
 import { DocumentsService } from './documents.service';
 import { UploadDocumentDto } from './dto/upload-document.dto';
 import { UpdateDocumentDto } from './dto/update-document.dto';
+import { ShareDocumentDto } from './dto/share-document.dto';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { CurrentUser } from '../../common/decorators/current-user.decorator';
 import { Public } from '../auth/decorators/public.decorator';
@@ -85,6 +87,112 @@ export class DocumentsController {
           user.id,
         ),
       },
+    };
+  }
+
+  @Post('companies/:companyId/documents/bulk')
+  @UseInterceptors(
+    FilesInterceptor('files', 50, {
+      limits: {
+        fileSize: 50 * 1024 * 1024, // 50MB per file
+      },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'رفع ملفات متعددة' })
+  @ApiBody({
+    schema: {
+      type: 'object',
+      properties: {
+        files: { type: 'array', items: { type: 'string', format: 'binary' } },
+        category: { type: 'string' },
+        folderId: { type: 'string' },
+      },
+    },
+  })
+  async uploadMultiple(
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+    @UploadedFiles() files: Express.Multer.File[],
+    @Body() body: { category?: string; folderId?: string },
+    @CurrentUser() user,
+  ) {
+    return {
+      success: true,
+      data: {
+        documents: await this.documentsService.uploadMultiple(
+          companyId,
+          files,
+          { category: body.category || 'OTHER', folderId: body.folderId },
+          user.id,
+        ),
+      },
+    };
+  }
+
+  @Post('companies/:companyId/documents/:id/replace')
+  @UseInterceptors(
+    FileInterceptor('file', {
+      limits: {
+        fileSize: 50 * 1024 * 1024, // 50MB
+      },
+    }),
+  )
+  @ApiConsumes('multipart/form-data')
+  @ApiOperation({ summary: 'استبدال ملف موجود' })
+  async replaceFile(
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @UploadedFile() file: Express.Multer.File,
+    @CurrentUser() user,
+  ) {
+    return {
+      success: true,
+      data: {
+        document: await this.documentsService.replaceFile(
+          companyId,
+          id,
+          file,
+          user.id,
+        ),
+      },
+    };
+  }
+
+  @Get('companies/:companyId/documents/download-all')
+  @ApiOperation({ summary: 'تحميل جميع ملفات الشركة كـ ZIP' })
+  async downloadAll(
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+    @Res() res,
+    @CurrentUser() user,
+  ) {
+    const { stream, fileName } = await this.documentsService.downloadAllAsZip(
+      companyId,
+      user.id,
+      user.role,
+    );
+
+    res.set({
+      'Content-Type': 'application/zip',
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}"`,
+      'Cache-Control': 'private, no-cache, no-store, must-revalidate',
+    });
+
+    stream.pipe(res);
+  }
+
+  @Get('documents')
+  @ApiOperation({ summary: 'الحصول على جميع الوثائق (لجميع الشركات)' })
+  async findAllDocuments(
+    @Query() query: any,
+    @CurrentUser() user,
+  ) {
+    return {
+      success: true,
+      data: await this.documentsService.findAllDocuments(
+        query,
+        user.id,
+        user.role,
+      ),
     };
   }
 
@@ -162,6 +270,29 @@ export class DocumentsController {
       data: await this.documentsService.reject(id, body.reason, user.id),
       message: 'تم رفض الوثيقة',
     };
+  }
+
+  @Get('companies/:companyId/documents/:id/download')
+  @ApiOperation({ summary: 'تحميل الوثيقة مباشرة' })
+  async download(
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user,
+    @Res() res,
+  ) {
+    const { stream, mimeType, fileName } = await this.documentsService.download(
+      id,
+      user.id,
+      user.role,
+    );
+
+    res.set({
+      'Content-Type': mimeType,
+      'Content-Disposition': `attachment; filename="${encodeURIComponent(fileName)}"`,
+      'Cache-Control': 'private, no-cache, no-store, must-revalidate',
+    });
+
+    stream.pipe(res);
   }
 
   @Delete('companies/:companyId/documents/:id')
@@ -254,6 +385,93 @@ export class DocumentsController {
     });
 
     stream.pipe(res);
+  }
+
+  // ============================================================================
+  // Document Sharing Endpoints
+  // ============================================================================
+
+  @Post('companies/:companyId/documents/:id/share')
+  @ApiOperation({ summary: 'مشاركة المستند مع مستخدم' })
+  async shareDocument(
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() shareDto: ShareDocumentDto,
+    @CurrentUser() user,
+  ) {
+    return {
+      success: true,
+      data: {
+        share: await this.documentsService.shareDocument(
+          id,
+          companyId,
+          shareDto,
+          user.id,
+          user.role,
+        ),
+      },
+      message: 'تم مشاركة المستند بنجاح',
+    };
+  }
+
+  @Get('companies/:companyId/documents/:id/shares')
+  @ApiOperation({ summary: 'الحصول على قائمة مشاركات المستند' })
+  async getDocumentShares(
+    @Param('companyId', ParseUUIDPipe) companyId: string,
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user,
+  ) {
+    return {
+      success: true,
+      data: await this.documentsService.getDocumentShares(id, user.id, user.role),
+    };
+  }
+
+  @Get('documents/shared-by-me')
+  @ApiOperation({ summary: 'الحصول على المستندات التي شاركها المستخدم' })
+  async getDocumentsSharedByMe(
+    @Query('companyId') companyId: string | undefined,
+    @CurrentUser() user,
+  ) {
+    return {
+      success: true,
+      data: await this.documentsService.getDocumentsSharedByUser(user.id, companyId),
+    };
+  }
+
+  @Patch('documents/shares/:id/permission')
+  @ApiOperation({ summary: 'تحديث صلاحيات مشاركة المستند' })
+  async updateDocumentShare(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() body: { permissionLevel: string },
+    @CurrentUser() user,
+  ) {
+    return {
+      success: true,
+      data: {
+        share: await this.documentsService.updateDocumentShare(
+          id,
+          body.permissionLevel,
+          user.id,
+          user.role,
+        ),
+      },
+      message: 'تم تحديث الصلاحيات بنجاح',
+    };
+  }
+
+  @Delete('documents/shares/:id')
+  @HttpCode(HttpStatus.OK)
+  @ApiOperation({ summary: 'إلغاء مشاركة المستند' })
+  async revokeDocumentShare(
+    @Param('id', ParseUUIDPipe) id: string,
+    @CurrentUser() user,
+  ) {
+    await this.documentsService.revokeDocumentShare(id, user.id, user.role);
+    return {
+      success: true,
+      message: 'تم إلغاء المشاركة بنجاح',
+    };
   }
 }
 

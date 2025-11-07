@@ -20,9 +20,35 @@ export const useUIStore = create<UIState>()(
 
       setSidebarOpen: (open: boolean) => set({ sidebarOpen: open }),
 
-      setTheme: (theme: 'light' | 'dark') => set({ theme }),
+      setTheme: (theme: 'light' | 'dark') => {
+        set({ theme });
+        // Apply theme immediately
+        if (typeof window !== 'undefined') {
+          const root = document.documentElement;
+          if (theme === 'dark') {
+            root.classList.add('dark');
+          } else {
+            root.classList.remove('dark');
+          }
+        }
+      },
 
-      toggleTheme: () => set((state) => ({ theme: state.theme === 'light' ? 'dark' : 'light' })),
+      toggleTheme: () => {
+        set((state) => {
+          const newTheme = state.theme === 'light' ? 'dark' : 'light';
+          // Apply theme immediately
+          if (typeof window !== 'undefined') {
+            const root = document.documentElement;
+            // Force remove dark class first
+            root.classList.remove('dark');
+            // Then add it if needed
+            if (newTheme === 'dark') {
+              root.classList.add('dark');
+            }
+          }
+          return { theme: newTheme };
+        });
+      },
     }),
     {
       name: 'ui-storage',

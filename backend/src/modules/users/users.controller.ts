@@ -10,6 +10,18 @@ import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 export class UsersController {
   constructor(private readonly usersService: UsersService) {}
 
+  @Post()
+  @ApiOperation({ summary: 'إنشاء مستخدم جديد' })
+  async create(@Body() createData: any) {
+    return {
+      success: true,
+      data: {
+        user: await this.usersService.create(createData),
+      },
+      message: 'تم إنشاء المستخدم بنجاح',
+    };
+  }
+
   @Get()
   @ApiOperation({ summary: 'الحصول على قائمة المستخدمين' })
   async findAll(@Query() query: any) {
@@ -48,6 +60,15 @@ export class UsersController {
     return {
       success: true,
       message: 'تم حذف المستخدم بنجاح',
+    };
+  }
+
+  @Get(':id/activities')
+  @ApiOperation({ summary: 'الحصول على سجل النشاطات للمستخدم' })
+  async getActivityLog(@Param('id') id: string, @Query() query: any) {
+    return {
+      success: true,
+      data: await this.usersService.getActivityLog(id, query),
     };
   }
 }

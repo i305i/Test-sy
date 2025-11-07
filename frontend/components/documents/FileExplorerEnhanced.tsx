@@ -7,6 +7,7 @@ import { UploadDocumentModal } from './UploadDocumentModal';
 import { DocumentPreviewModal } from './DocumentPreviewModal';
 import { FileIcon } from './FileIcon';
 import { getFileTypeLabel, getFileColor, formatFileSize, formatDate } from '@/lib/file-utils';
+import { useAuthStore } from '@/store';
 
 interface FileExplorerProps {
   companyId: string;
@@ -16,6 +17,7 @@ interface FileExplorerProps {
 
 export function FileExplorer({ companyId, companyName, initialFolderId = null }: FileExplorerProps) {
   const { showToast } = useToast();
+  const { user: currentUser } = useAuthStore();
   
   const [currentFolderId, setCurrentFolderId] = useState<string | null>(initialFolderId);
   const [folders, setFolders] = useState<any[]>([]);
@@ -27,10 +29,29 @@ export function FileExplorer({ companyId, companyName, initialFolderId = null }:
   const [showNewFolderModal, setShowNewFolderModal] = useState(false);
   const [previewDocument, setPreviewDocument] = useState<any | null>(null);
   const [isDragging, setIsDragging] = useState(false);
+  const [documentShares, setDocumentShares] = useState<Record<string, any[]>>({});
+  const [documentsSharedByMe, setDocumentsSharedByMe] = useState<Record<string, any[]>>({});
+  const [showShareModal, setShowShareModal] = useState<{ documentId: string; companyId: string } | null>(null);
+  const [employees, setEmployees] = useState<any[]>([]);
+  const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
+  const [permissionLevel, setPermissionLevel] = useState('VIEW');
+  const [isSharing, setIsSharing] = useState(false);
 
   useEffect(() => {
     fetchFolderContents();
+    fetchEmployees();
   }, [currentFolderId, companyId]);
+
+  useEffect(() => {
+    // Fetch shares for all documents
+    if (documents.length > 0) {
+      documents.forEach(doc => {
+        fetchDocumentShares(doc.id);
+      });
+    }
+    // Fetch documents shared by current user
+    fetchDocumentsSharedByMe();
+  }, [documents, companyId]);
 
   const fetchFolderContents = async () => {
     try {
@@ -50,6 +71,90 @@ export function FileExplorer({ companyId, companyName, initialFolderId = null }:
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const fetchEmployees = async () => {
+    try {
+      const response = await apiClient.getUsers({ limit: 100 });
+      const allUsers = response.items || [];
+      const employeeList = allUsers.filter((u: any) => u.role === 'EMPLOYEE');
+      setEmployees(employeeList);
+    } catch (error) {
+      console.error('Error fetching employees:', error);
+      setEmployees([]);
+    }
+  };
+
+  const fetchDocumentShares = async (documentId: string) => {
+    try {
+      const shares = await apiClient.getDocumentShares(companyId, documentId);
+      setDocumentShares(prev => ({
+        ...prev,
+        [documentId]: shares,
+      }));
+    } catch (error) {
+      console.error('Error fetching document shares:', error);
+    }
+  };
+
+  const handleShareDocument = async () => {
+    if (!showShareModal || !selectedEmployeeId) return;
+
+    try {
+      setIsSharing(true);
+      await apiClient.shareDocument(showShareModal.companyId, showShareModal.documentId, {
+        sharedWithUserId: selectedEmployeeId,
+        permissionLevel,
+      });
+      showToast('تم مشاركة المستند بنجاح', 'success');
+      await fetchDocumentShares(showShareModal.documentId);
+      setShowShareModal(null);
+      setSelectedEmployeeId('');
+      setPermissionLevel('VIEW');
+    } catch (error: any) {
+      showToast(error.response?.data?.error?.message || 'فشل في مشاركة المستند', 'error');
+    } finally {
+      setIsSharing(false);
+    }
+  };
+
+  const canManageShare = (document: any) => {
+    if (!currentUser) return false;
+    return (
+      currentUser.role === 'ADMIN' ||
+      currentUser.role === 'SUPERVISOR' ||
+      document.uploadedById === currentUser.id
+    );
+  };
+
+  const getMyShare = (documentId: string) => {
+    if (!currentUser) return null;
+    const shares = documentShares[documentId] || [];
+    return shares.find((s: any) => s.sharedWithUserId === currentUser.id);
+  };
+
+  const fetchDocumentsSharedByMe = async () => {
+    try {
+      const sharedDocs = await apiClient.getDocumentsSharedByMe(companyId);
+      const sharedMap: Record<string, any[]> = {};
+      sharedDocs.forEach((item: any) => {
+        const docId = item.document.id;
+        if (!sharedMap[docId]) {
+          sharedMap[docId] = [];
+        }
+        sharedMap[docId].push(item);
+      });
+      setDocumentsSharedByMe(sharedMap);
+    } catch (error) {
+      console.error('Error fetching documents shared by me:', error);
+    }
+  };
+
+  const getSharedByMeInfo = (documentId: string) => {
+    const shared = documentsSharedByMe[documentId];
+    if (!shared || shared.length === 0) return null;
+    // Return the first share (or combine all if needed)
+    return shared[0];
   };
 
   // Drag & Drop handlers
@@ -108,11 +213,21 @@ export function FileExplorer({ companyId, companyName, initialFolderId = null }:
     setPreviewDocument(document);
   };
 
-  const handleDocumentDownload = async (document: any) => {
+  const handleDocumentDownload = async (doc: any) => {
     try {
-      window.open(document.downloadUrl, '_blank');
-    } catch (error) {
-      showToast('فشل في تحميل المستند', 'error');
+      const blob = await apiClient.downloadDocument(doc.id, companyId);
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = doc.originalName || doc.name;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      window.URL.revokeObjectURL(url);
+      showToast('تم تحميل المستند بنجاح', 'success');
+    } catch (error: any) {
+      console.error('Download error:', error);
+      showToast(error.response?.data?.error?.message || 'فشل في تحميل المستند', 'error');
     }
   };
 
@@ -149,6 +264,25 @@ export function FileExplorer({ companyId, companyName, initialFolderId = null }:
     } catch (error: any) {
       showToast(error.response?.data?.error?.message || 'فشل في حذف المستند', 'error');
     }
+  };
+
+  const handleReplaceDocument = async (documentId: string) => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png';
+    input.onchange = async (e: any) => {
+      const file = e.target.files?.[0];
+      if (!file) return;
+
+      try {
+        await apiClient.replaceDocument(companyId, documentId, file);
+        showToast('تم استبدال الملف بنجاح', 'success');
+        fetchFolderContents();
+      } catch (error: any) {
+        showToast(error.response?.data?.error?.message || 'فشل في استبدال الملف', 'error');
+      }
+    };
+    input.click();
   };
 
   if (isLoading) {
@@ -308,6 +442,10 @@ export function FileExplorer({ companyId, companyName, initialFolderId = null }:
             {/* Documents */}
             {documents.map((doc) => {
               const colorClass = getFileColor(doc.mimeType);
+              const myShare = getMyShare(doc.id);
+              const sharedByMe = getSharedByMeInfo(doc.id);
+              const shares = documentShares[doc.id] || [];
+              const canManage = canManageShare(doc);
               return (
                 <div
                   key={doc.id}
@@ -324,10 +462,42 @@ export function FileExplorer({ companyId, companyName, initialFolderId = null }:
                     <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
                       {formatFileSize(doc.fileSize)} • {getFileTypeLabel(doc.mimeType)}
                     </p>
+                    {/* Share Info - Shared with me */}
+                    {myShare && (
+                      <div className="mt-2 px-2 py-1 bg-blue-50 dark:bg-blue-900/20 rounded-lg text-xs text-blue-600 dark:text-blue-400">
+                        <span className="font-medium">مشارك معك</span>
+                        <span className="block text-xs mt-0.5">
+                          من: {myShare.sharedByUser?.firstName} {myShare.sharedByUser?.lastName}
+                        </span>
+                      </div>
+                    )}
+                    {/* Share Info - Shared by me */}
+                    {sharedByMe && (
+                      <div className="mt-2 px-2 py-1 bg-green-50 dark:bg-green-900/20 rounded-lg text-xs text-green-600 dark:text-green-400">
+                        <span className="font-medium">تم مشاركته من قبل</span>
+                        <span className="block text-xs mt-0.5">
+                          مع: {sharedByMe.sharedWith?.firstName} {sharedByMe.sharedWith?.lastName}
+                        </span>
+                      </div>
+                    )}
                   </div>
 
                   {/* Actions */}
                   <div className="absolute top-2 left-2 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
+                    {canManage && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          setShowShareModal({ documentId: doc.id, companyId });
+                        }}
+                        className="p-1.5 bg-purple-100 dark:bg-purple-900/30 text-purple-600 dark:text-purple-400 rounded-lg hover:bg-purple-200 dark:hover:bg-purple-900/50 transition-colors"
+                        title="مشاركة"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8.684 13.342C8.886 12.938 9 12.482 9 12c0-.482-.114-.938-.316-1.342m0 2.684a3 3 0 110-2.684m0 2.684l6.632 3.316m-6.632-6l6.632-3.316m0 0a3 3 0 105.367-2.684 3 3 0 00-5.367 2.684zm0 9.316a3 3 0 105.368 2.684 3 3 0 00-5.368-2.684z" />
+                        </svg>
+                      </button>
+                    )}
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -340,18 +510,34 @@ export function FileExplorer({ companyId, companyName, initialFolderId = null }:
                         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
                       </svg>
                     </button>
-                    <button
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleDeleteDocument(doc.id);
-                      }}
-                      className="p-1.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
-                      title="حذف"
-                    >
-                      <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                        <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
-                      </svg>
-                    </button>
+                    {canManage && (
+                      <>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleReplaceDocument(doc.id);
+                          }}
+                          className="p-1.5 bg-green-100 dark:bg-green-900/30 text-green-600 dark:text-green-400 rounded-lg hover:bg-green-200 dark:hover:bg-green-900/50 transition-colors"
+                          title="استبدال"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-5-4l-5 5m0 0l-5-5m5 5V3" />
+                          </svg>
+                        </button>
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDeleteDocument(doc.id);
+                          }}
+                          className="p-1.5 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 rounded-lg hover:bg-red-200 dark:hover:bg-red-900/50 transition-colors"
+                          title="حذف"
+                        >
+                          <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" />
+                          </svg>
+                        </button>
+                      </>
+                    )}
                   </div>
                 </div>
               );
@@ -406,45 +592,86 @@ export function FileExplorer({ companyId, companyName, initialFolderId = null }:
                 ))}
 
                 {/* Documents */}
-                {documents.map((doc) => (
-                  <tr
-                    key={doc.id}
-                    className="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors"
-                    onClick={() => handleDocumentPreview(doc)}
-                  >
-                    <td className="px-6 py-4 whitespace-nowrap">
-                      <div className="flex items-center gap-3">
-                        <div className={`w-8 h-8 rounded-lg ${getFileColor(doc.mimeType)} flex items-center justify-center`}>
-                          <FileIcon mimeType={doc.mimeType} className="w-5 h-5" />
+                {documents.map((doc) => {
+                  const myShare = getMyShare(doc.id);
+                  const sharedByMe = getSharedByMeInfo(doc.id);
+                  const canManage = canManageShare(doc);
+                  return (
+                    <tr
+                      key={doc.id}
+                      className="hover:bg-gray-50 dark:hover:bg-gray-700/50 cursor-pointer transition-colors"
+                      onClick={() => handleDocumentPreview(doc)}
+                    >
+                      <td className="px-6 py-4 whitespace-nowrap">
+                        <div className="flex items-center gap-3">
+                          <div className={`w-8 h-8 rounded-lg ${getFileColor(doc.mimeType)} flex items-center justify-center`}>
+                            <FileIcon mimeType={doc.mimeType} className="w-5 h-5" />
+                          </div>
+                          <div>
+                            <span className="text-sm font-medium text-gray-900 dark:text-white">{doc.name}</span>
+                            {myShare && (
+                              <div className="text-xs text-blue-600 dark:text-blue-400 mt-0.5">
+                                مشارك معك من: {myShare.sharedByUser?.firstName} {myShare.sharedByUser?.lastName}
+                              </div>
+                            )}
+                            {sharedByMe && (
+                              <div className="text-xs text-green-600 dark:text-green-400 mt-0.5">
+                                تم مشاركته من قبل مع: {sharedByMe.sharedWith?.firstName} {sharedByMe.sharedWith?.lastName}
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        <span className="text-sm font-medium text-gray-900 dark:text-white">{doc.name}</span>
-                      </div>
-                    </td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{getFileTypeLabel(doc.mimeType)}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{formatFileSize(doc.fileSize)}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{formatDate(doc.uploadedAt)}</td>
-                    <td className="px-6 py-4 whitespace-nowrap text-sm space-x-3 space-x-reverse">
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDocumentDownload(doc);
-                        }}
-                        className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
-                      >
-                        تحميل
-                      </button>
-                      <button
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          handleDeleteDocument(doc.id);
-                        }}
-                        className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
-                      >
-                        حذف
-                      </button>
-                    </td>
-                  </tr>
-                ))}
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{getFileTypeLabel(doc.mimeType)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{formatFileSize(doc.fileSize)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">{formatDate(doc.uploadedAt)}</td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm space-x-3 space-x-reverse">
+                        {canManage && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setShowShareModal({ documentId: doc.id, companyId });
+                            }}
+                            className="text-purple-600 dark:text-purple-400 hover:text-purple-700 dark:hover:text-purple-300"
+                          >
+                            مشاركة
+                          </button>
+                        )}
+                        <button
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            handleDocumentDownload(doc);
+                          }}
+                          className="text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300"
+                        >
+                          تحميل
+                        </button>
+                        {canManage && (
+                          <>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleReplaceDocument(doc.id);
+                              }}
+                              className="text-green-600 dark:text-green-400 hover:text-green-700 dark:hover:text-green-300"
+                            >
+                              استبدال
+                            </button>
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleDeleteDocument(doc.id);
+                              }}
+                              className="text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300"
+                            >
+                              حذف
+                            </button>
+                          </>
+                        )}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
@@ -479,6 +706,100 @@ export function FileExplorer({ companyId, companyName, initialFolderId = null }:
           onClose={() => setPreviewDocument(null)}
           document={previewDocument}
         />
+      )}
+
+      {/* Share Document Modal */}
+      {showShareModal && (
+        <div className="fixed inset-0 bg-black/50 backdrop-blur-sm flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full">
+            <div className="p-6 border-b border-gray-200 dark:border-gray-700">
+              <div className="flex items-center justify-between">
+                <h3 className="text-xl font-bold text-gray-900 dark:text-white">
+                  مشاركة المستند
+                </h3>
+                <button
+                  onClick={() => {
+                    setShowShareModal(null);
+                    setSelectedEmployeeId('');
+                    setPermissionLevel('VIEW');
+                  }}
+                  className="p-2 hover:bg-gray-100 dark:hover:bg-gray-700 rounded-lg transition-colors"
+                >
+                  <svg className="w-6 h-6 text-gray-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+            </div>
+            <div className="p-6 space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  اختر الموظف <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={selectedEmployeeId}
+                  onChange={(e) => setSelectedEmployeeId(e.target.value)}
+                  className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">اختر موظف</option>
+                  {employees
+                    .filter(emp => {
+                      const shares = documentShares[showShareModal.documentId] || [];
+                      return !shares.some(s => s.sharedWithUserId === emp.id && s.status === 'ACTIVE');
+                    })
+                    .map((employee) => (
+                      <option key={employee.id} value={employee.id}>
+                        {employee.firstName} {employee.lastName} ({employee.email})
+                      </option>
+                    ))}
+                </select>
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  مستوى الصلاحية <span className="text-red-500">*</span>
+                </label>
+                <select
+                  value={permissionLevel}
+                  onChange={(e) => setPermissionLevel(e.target.value)}
+                  className="w-full px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="VIEW">عرض فقط - يمكنه عرض المستند فقط</option>
+                  <option value="EDIT">تعديل - يمكنه تعديل المستند</option>
+                  <option value="MANAGE">إدارة كاملة - جميع الصلاحيات</option>
+                </select>
+              </div>
+              <div className="flex items-center justify-end gap-3 pt-4">
+                <button
+                  onClick={() => {
+                    setShowShareModal(null);
+                    setSelectedEmployeeId('');
+                    setPermissionLevel('VIEW');
+                  }}
+                  className="px-6 py-3 border border-gray-300 dark:border-gray-600 text-gray-700 dark:text-gray-300 rounded-xl font-medium hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                >
+                  إلغاء
+                </button>
+                <button
+                  onClick={handleShareDocument}
+                  disabled={isSharing || !selectedEmployeeId}
+                  className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-2"
+                >
+                  {isSharing ? (
+                    <>
+                      <svg className="animate-spin h-5 w-5" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                      </svg>
+                      جاري المشاركة...
+                    </>
+                  ) : (
+                    'مشاركة'
+                  )}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

@@ -52,9 +52,7 @@ export class SharesController {
   ) {
     return {
       success: true,
-      data: {
-        shares: await this.sharesService.findAll(companyId, user.id),
-      },
+      data: await this.sharesService.findAll(companyId, user.id, user.role),
     };
   }
 

@@ -54,6 +54,7 @@ export function FileExplorer({ companyId, companyName, initialFolderId = null }:
   const [showUploadModal, setShowUploadModal] = useState(false);
   const [searchQuery, setSearchQuery] = useState('');
   const [folderTree, setFolderTree] = useState<any[]>([]);
+  const [previewDocument, setPreviewDocument] = useState<any | null>(null);
 
   useEffect(() => {
     fetchFolderContents();
@@ -96,8 +97,10 @@ export function FileExplorer({ companyId, companyName, initialFolderId = null }:
 
   const handleDocumentClick = async (documentId: string) => {
     try {
-      const { url } = await apiClient.getDocumentDownloadUrl(documentId);
-      window.open(url, '_blank');
+      const doc = documents.find(d => d.id === documentId);
+      if (doc) {
+        setPreviewDocument(doc);
+      }
     } catch (error) {
       showToast('فشل في فتح المستند', 'error');
     }
@@ -340,9 +343,23 @@ export function FileExplorer({ companyId, companyName, initialFolderId = null }:
                     <p className="text-sm font-medium text-gray-900 dark:text-white truncate w-full mb-1">
                       {folder.name}
                     </p>
-                    <p className="text-xs text-gray-500 dark:text-gray-400">
-                      {folder._count.documents} ملف
-                    </p>
+                    <div className="flex items-center justify-center gap-3 text-xs text-gray-500 dark:text-gray-400">
+                      {folder._count?.children > 0 && (
+                        <span className="flex items-center gap-1 bg-blue-50 dark:bg-blue-900/20 px-2 py-1 rounded">
+                          <span>📁</span>
+                          <span className="font-medium">{folder._count.children} مجلد</span>
+                        </span>
+                      )}
+                      {folder._count?.documents > 0 && (
+                        <span className="flex items-center gap-1 bg-green-50 dark:bg-green-900/20 px-2 py-1 rounded">
+                          <span>📄</span>
+                          <span className="font-medium">{folder._count.documents} ملف</span>
+                        </span>
+                      )}
+                      {folder._count?.children === 0 && folder._count?.documents === 0 && (
+                        <span className="text-gray-400 italic">فارغ</span>
+                      )}
+                    </div>
                   </div>
                 </div>
               ))}
@@ -389,10 +406,34 @@ export function FileExplorer({ companyId, companyName, initialFolderId = null }:
                     >
                       <td className="px-4 py-3 flex items-center gap-3">
                         <span className="text-2xl">📁</span>
-                        <span className="text-sm font-medium text-gray-900 dark:text-white">{folder.name}</span>
+                        <div className="flex flex-col">
+                          <span className="text-sm font-medium text-gray-900 dark:text-white">{folder.name}</span>
+                          <div className="flex items-center gap-3 text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            {folder._count?.children > 0 && (
+                              <span className="flex items-center gap-1">
+                                <span>📁</span>
+                                <span>{folder._count.children} مجلد</span>
+                              </span>
+                            )}
+                            {folder._count?.documents > 0 && (
+                              <span className="flex items-center gap-1">
+                                <span>📄</span>
+                                <span>{folder._count.documents} ملف</span>
+                              </span>
+                            )}
+                            {folder._count?.children === 0 && folder._count?.documents === 0 && (
+                              <span>فارغ</span>
+                            )}
+                          </div>
+                        </div>
                       </td>
                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">مجلد</td>
-                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{folder._count.documents} ملف</td>
+                      <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">
+                        {folder._count?.children > 0 && `${folder._count.children} مجلد`}
+                        {folder._count?.children > 0 && folder._count?.documents > 0 && ' • '}
+                        {folder._count?.documents > 0 && `${folder._count.documents} ملف`}
+                        {folder._count?.children === 0 && folder._count?.documents === 0 && 'فارغ'}
+                      </td>
                       <td className="px-4 py-3 text-sm text-gray-600 dark:text-gray-400">{formatDate(folder.createdAt)}</td>
                       <td className="px-4 py-3">
                         <button
@@ -477,6 +518,15 @@ export function FileExplorer({ companyId, companyName, initialFolderId = null }:
           }}
         />
       )}
+
+      {/* Document Preview Modal */}
+      {previewDocument && (
+        <DocumentPreviewModal
+          isOpen={!!previewDocument}
+          onClose={() => setPreviewDocument(null)}
+          document={previewDocument}
+        />
+      )}
     </div>
   );
 }
@@ -533,9 +583,20 @@ function FolderTreeView({ folders, currentFolderId, onFolderClick }: any) {
           >
             <span>📁</span>
             <span className="truncate">{folder.name}</span>
-            {folder._count?.documents > 0 && (
-              <span className="text-xs text-gray-500">({folder._count.documents})</span>
-            )}
+            <div className="flex items-center gap-2 text-xs text-gray-500 dark:text-gray-400">
+              {folder._count?.children > 0 && (
+                <span className="flex items-center gap-1">
+                  <span>📁</span>
+                  <span>{folder._count.children}</span>
+                </span>
+              )}
+              {folder._count?.documents > 0 && (
+                <span className="flex items-center gap-1">
+                  <span>📄</span>
+                  <span>{folder._count.documents}</span>
+                </span>
+              )}
+            </div>
           </button>
         </div>
         {hasChildren && isExpanded && (

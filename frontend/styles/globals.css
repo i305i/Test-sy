@@ -1,8 +1,25 @@
 @import "tailwindcss";
 
-/* Dark Mode */
-.dark {
+/* Dark Mode - Tailwind v4 uses class-based dark mode by default */
+/* Ensure dark mode works by setting color-scheme */
+html.dark {
   color-scheme: dark;
+}
+
+/* Force light mode when dark class is not present */
+html:not(.dark) {
+  color-scheme: light;
+}
+
+/* Ensure body background changes with theme */
+body {
+  background-color: white;
+  color: #111827;
+}
+
+html.dark body {
+  background-color: #111827;
+  color: #f9fafb;
 }
 
 /* RTL Support */

@@ -16,9 +16,16 @@ export default function CompaniesPage() {
   const [statusFilter, setStatusFilter] = useState<string>('ALL');
   const [currentPage, setCurrentPage] = useState(1);
   const [totalPages, setTotalPages] = useState(1);
+  const [stats, setStats] = useState({
+    total: 0,
+    ready: 0,
+    inProgress: 0,
+    incomplete: 0,
+  });
 
   useEffect(() => {
     fetchCompanies();
+    fetchStats();
   }, [currentPage, statusFilter]);
 
   const fetchCompanies = async () => {
@@ -54,11 +61,21 @@ export default function CompaniesPage() {
     fetchCompanies();
   };
 
-  const stats = {
-    total: companies.length,
-    ready: companies.filter(c => c.status === 'READY').length,
-    inProgress: companies.filter(c => c.status === 'IN_PROGRESS').length,
-    incomplete: companies.filter(c => c.status === 'INCOMPLETE').length,
+  const fetchStats = async () => {
+    try {
+      const dashboardStats = await apiClient.getDashboardStats();
+      if (dashboardStats?.companies) {
+        setStats({
+          total: dashboardStats.companies.total || 0,
+          ready: dashboardStats.companies.ready || 0,
+          inProgress: dashboardStats.companies.inProgress || 0,
+          incomplete: dashboardStats.companies.onHold || 0, // Backend uses ON_HOLD, not INCOMPLETE
+        });
+      }
+    } catch (error) {
+      console.error('Error fetching stats:', error);
+      // Keep current stats or set to 0
+    }
   };
 
   return (
@@ -131,12 +148,12 @@ export default function CompaniesPage() {
         <div className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-600 dark:text-gray-400">غير مكتملة</p>
-              <p className="text-2xl font-bold text-red-600 dark:text-red-400 mt-1">{stats.incomplete}</p>
+              <p className="text-sm text-gray-600 dark:text-gray-400">متوقفة</p>
+              <p className="text-2xl font-bold text-orange-600 dark:text-orange-400 mt-1">{stats.incomplete}</p>
             </div>
-            <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center justify-center">
-              <svg className="w-6 h-6 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+            <div className="w-12 h-12 bg-orange-100 dark:bg-orange-900/30 rounded-lg flex items-center justify-center">
+              <svg className="w-6 h-6 text-orange-600 dark:text-orange-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 9v6m4-6v6m7-3a9 9 0 11-18 0 9 9 0 0118 0z" />
               </svg>
             </div>
           </div>
@@ -173,7 +190,7 @@ export default function CompaniesPage() {
               { value: 'ALL', label: 'الكل', color: 'gray' },
               { value: 'READY', label: 'جاهزة', color: 'green' },
               { value: 'IN_PROGRESS', label: 'قيد الإنجاز', color: 'yellow' },
-              { value: 'INCOMPLETE', label: 'غير مكتملة', color: 'red' },
+              { value: 'ON_HOLD', label: 'متوقفة', color: 'orange' },
             ].map((filter) => (
               <button
                 key={filter.value}

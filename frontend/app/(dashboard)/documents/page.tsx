@@ -12,7 +12,7 @@ interface Document {
   fileSize: number;
   mimeType: string;
   category: string;
-  status: 'DRAFT' | 'PENDING_REVIEW' | 'APPROVED' | 'REJECTED';
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
   description?: string;
   company: {
     id: string;
@@ -45,9 +45,7 @@ export default function DocumentsPage() {
   }, []);
 
   useEffect(() => {
-    if (selectedCompanyId) {
-      fetchDocuments();
-    }
+    fetchDocuments();
   }, [currentPage, categoryFilter, statusFilter, selectedCompanyId]);
 
   const fetchCompanies = async () => {
@@ -64,17 +62,16 @@ export default function DocumentsPage() {
   };
 
   const fetchDocuments = async () => {
-    if (!selectedCompanyId) {
-      setDocuments([]);
-      return;
-    }
-
     try {
       setIsLoading(true);
       const params: any = {
         page: currentPage,
         limit: 12,
       };
+
+      if (selectedCompanyId) {
+        params.companyId = selectedCompanyId;
+      }
 
       if (categoryFilter !== 'ALL') {
         params.category = categoryFilter;
@@ -88,7 +85,7 @@ export default function DocumentsPage() {
         params.search = searchQuery;
       }
 
-      const response = await apiClient.getDocuments(selectedCompanyId, params);
+      const response = await apiClient.getAllDocuments(params);
       setDocuments(response.items || []);
       setTotalPages(response.meta?.totalPages || 1);
     } catch (error) {
@@ -105,9 +102,21 @@ export default function DocumentsPage() {
     fetchDocuments();
   };
 
-  const handleDownload = async (documentId: string, fileName: string) => {
+  // Also trigger search when searchQuery changes (debounced)
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (searchQuery !== undefined) {
+        setCurrentPage(1);
+        fetchDocuments();
+      }
+    }, 500);
+
+    return () => clearTimeout(timer);
+  }, [searchQuery]);
+
+  const handleDownload = async (documentId: string, fileName: string, companyId: string) => {
     try {
-      const blob = await apiClient.downloadDocument(documentId);
+      const blob = await apiClient.downloadDocument(documentId, companyId);
       const url = window.URL.createObjectURL(blob);
       const a = document.createElement('a');
       a.href = url;
@@ -136,12 +145,11 @@ export default function DocumentsPage() {
 
   const getStatusBadge = (status: string) => {
     const badges: Record<string, { label: string; className: string }> = {
-      DRAFT: { label: 'مسودة', className: 'bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300' },
-      PENDING_REVIEW: { label: 'قيد المراجعة', className: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400' },
+      PENDING: { label: 'قيد المراجعة', className: 'bg-yellow-100 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-400' },
       APPROVED: { label: 'معتمد', className: 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400' },
       REJECTED: { label: 'مرفوض', className: 'bg-red-100 dark:bg-red-900/30 text-red-700 dark:text-red-400' },
     };
-    return badges[status] || badges.DRAFT;
+    return badges[status] || badges.PENDING;
   };
 
   const getCategoryIcon = (category: string) => {
@@ -165,8 +173,8 @@ export default function DocumentsPage() {
   const stats = {
     total: documents.length,
     approved: documents.filter(d => d.status === 'APPROVED').length,
-    pending: documents.filter(d => d.status === 'PENDING_REVIEW').length,
-    draft: documents.filter(d => d.status === 'DRAFT').length,
+    pending: documents.filter(d => d.status === 'PENDING').length,
+    rejected: documents.filter(d => d.status === 'REJECTED').length,
   };
 
   return (
@@ -239,12 +247,12 @@ export default function DocumentsPage() {
         <div className="bg-white dark:bg-gray-800 rounded-xl p-5 border border-gray-200 dark:border-gray-700">
           <div className="flex items-center justify-between">
             <div>
-              <p className="text-sm text-gray-600 dark:text-gray-400">مسودات</p>
-              <p className="text-2xl font-bold text-gray-600 dark:text-gray-400 mt-1">{stats.draft}</p>
+              <p className="text-sm text-gray-600 dark:text-gray-400">مرفوضة</p>
+              <p className="text-2xl font-bold text-red-600 dark:text-red-400 mt-1">{stats.rejected}</p>
             </div>
-            <div className="w-12 h-12 bg-gray-100 dark:bg-gray-700 rounded-lg flex items-center justify-center">
-              <svg className="w-6 h-6 text-gray-600 dark:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+            <div className="w-12 h-12 bg-red-100 dark:bg-red-900/30 rounded-lg flex items-center justify-center">
+              <svg className="w-6 h-6 text-red-600 dark:text-red-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
               </svg>
             </div>
           </div>
@@ -319,11 +327,9 @@ export default function DocumentsPage() {
               setCurrentPage(1);
             }}
             className="px-4 py-3 bg-gray-50 dark:bg-gray-700 border border-gray-200 dark:border-gray-600 rounded-xl text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            disabled={!selectedCompanyId}
           >
             <option value="ALL">جميع الحالات</option>
-            <option value="DRAFT">مسودة</option>
-            <option value="PENDING_REVIEW">قيد المراجعة</option>
+            <option value="PENDING">قيد المراجعة</option>
             <option value="APPROVED">معتمد</option>
             <option value="REJECTED">مرفوض</option>
           </select>
@@ -434,8 +440,28 @@ export default function DocumentsPage() {
                         </td>
                         <td className="px-6 py-4">
                           <div className="flex items-center gap-2">
+                            <select
+                              value={doc.status}
+                              onChange={async (e) => {
+                                try {
+                                  await apiClient.updateDocument(doc.id, { 
+                                    status: e.target.value,
+                                    companyId: doc.company.id 
+                                  });
+                                  showToast('تم تحديث الحالة بنجاح', 'success');
+                                  fetchDocuments();
+                                } catch (error: any) {
+                                  showToast(error.response?.data?.error?.message || 'فشل تحديث الحالة', 'error');
+                                }
+                              }}
+                              className="px-3 py-1 text-xs border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                            >
+                              <option value="PENDING">قيد المراجعة</option>
+                              <option value="APPROVED">معتمد</option>
+                              <option value="REJECTED">مرفوض</option>
+                            </select>
                             <button
-                              onClick={() => handleDownload(doc.id, doc.fileName)}
+                              onClick={() => handleDownload(doc.id, doc.fileName, doc.company.id)}
                               className="p-2 text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 rounded-lg transition-colors"
                               title="تحميل"
                             >

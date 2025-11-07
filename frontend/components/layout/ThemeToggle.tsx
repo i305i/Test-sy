@@ -12,14 +12,18 @@ export default function ThemeToggle() {
     setMounted(true);
   }, []);
 
-  // Apply theme to document
+  // Apply theme to document immediately when it changes
   useEffect(() => {
-    if (theme === 'dark') {
-      document.documentElement.classList.add('dark');
-    } else {
-      document.documentElement.classList.remove('dark');
+    if (mounted && theme) {
+      const root = document.documentElement;
+      // Force remove dark class first
+      root.classList.remove('dark');
+      // Then add it if needed
+      if (theme === 'dark') {
+        root.classList.add('dark');
+      }
     }
-  }, [theme]);
+  }, [theme, mounted]);
 
   if (!mounted) {
     return (

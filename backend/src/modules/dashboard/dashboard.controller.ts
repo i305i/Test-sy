@@ -28,5 +28,14 @@ export class DashboardController {
       data: await this.dashboardService.getCompaniesChart(user.id, user.role),
     };
   }
+
+  @Get('employees')
+  @ApiOperation({ summary: 'الحصول على قائمة الموظفين مع شركاتهم وأنشطتهم' })
+  async getEmployeesWithCompanies(@CurrentUser() user) {
+    return {
+      success: true,
+      data: await this.dashboardService.getEmployeesWithCompanies(user.id, user.role),
+    };
+  }
 }
 

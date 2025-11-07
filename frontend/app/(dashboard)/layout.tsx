@@ -2,7 +2,7 @@
 
 import { useEffect } from 'react';
 import { useRouter } from 'next/navigation';
-import { useAuthStore } from '@/store';
+import { useAuthStore, useUIStore } from '@/store';
 import { Header, Sidebar } from '@/components/layout';
 
 export default function DashboardLayout({
@@ -11,7 +11,19 @@ export default function DashboardLayout({
   children: React.ReactNode;
 }) {
   const { isAuthenticated, checkAuth } = useAuthStore();
+  const { theme } = useUIStore();
   const router = useRouter();
+
+  // Apply theme on mount and when it changes
+  useEffect(() => {
+    const root = document.documentElement;
+    // Force remove dark class first
+    root.classList.remove('dark');
+    // Then add it if needed
+    if (theme === 'dark') {
+      root.classList.add('dark');
+    }
+  }, [theme]);
 
   useEffect(() => {
     checkAuth();

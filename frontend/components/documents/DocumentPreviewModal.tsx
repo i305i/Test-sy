@@ -4,7 +4,7 @@ import { useState, useEffect } from 'react';
 import apiClient from '@/lib/api';
 import { FileIcon } from './FileIcon';
 import { getFileTypeLabel, formatFileSize } from '@/lib/file-utils';
-import { LoadingSpinner } from '@/components/common';
+import { LoadingSpinner, useToast } from '@/components/common';
 
 interface DocumentPreviewModalProps {
   isOpen: boolean;
@@ -13,6 +13,7 @@ interface DocumentPreviewModalProps {
 }
 
 export function DocumentPreviewModal({ isOpen, onClose, document }: DocumentPreviewModalProps) {
+  const { showToast } = useToast();
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(true);
 
@@ -69,6 +70,7 @@ export function DocumentPreviewModal({ isOpen, onClose, document }: DocumentPrev
     ];
     return previewableTypes.includes(document?.mimeType);
   };
+
 
   const renderPreview = () => {
     if (!canPreview()) {

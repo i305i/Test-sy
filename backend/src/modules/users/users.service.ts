@@ -64,7 +64,9 @@ export class UsersService {
   }
 
   async findAll(query: { page?: number; limit?: number; role?: string; search?: string }) {
-    const { page = 1, limit = 20, role, search } = query;
+    const page = parseInt(String(query.page)) || 1;
+    const limit = parseInt(String(query.limit)) || 20;
+    const { role, search } = query;
     const skip = (page - 1) * limit;
 
     const where: any = {};
@@ -146,6 +148,41 @@ export class UsersService {
     return this.prisma.user.delete({
       where: { id },
     });
+  }
+
+  async getActivityLog(userId: string, query?: { page?: number; limit?: number }) {
+    const page = parseInt(String(query?.page)) || 1;
+    const limit = parseInt(String(query?.limit)) || 50;
+    const skip = (page - 1) * limit;
+
+    const [activities, total] = await Promise.all([
+      this.prisma.auditLog.findMany({
+        where: { userId },
+        skip,
+        take: limit,
+        orderBy: { createdAt: 'desc' },
+        include: {
+          user: {
+            select: {
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+        },
+      }),
+      this.prisma.auditLog.count({ where: { userId } }),
+    ]);
+
+    return {
+      activities,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
   }
 }
 

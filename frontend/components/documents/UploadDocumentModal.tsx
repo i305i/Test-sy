@@ -21,7 +21,8 @@ export function UploadDocumentModal({ isOpen, onClose, onSuccess, companyId, fol
   const { showToast } = useToast();
   const [companies, setCompanies] = useState<Company[]>([]);
   const [isLoading, setIsLoading] = useState(false);
-  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
+  const [uploadProgress, setUploadProgress] = useState<{ [key: string]: number }>({});
   const [formData, setFormData] = useState({
     companyId: companyId || '',
     folderId: folderId || null,
@@ -51,16 +52,36 @@ export function UploadDocumentModal({ isOpen, onClose, onSuccess, companyId, fol
   };
 
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    if (e.target.files && e.target.files[0]) {
-      setSelectedFile(e.target.files[0]);
+    if (e.target.files && e.target.files.length > 0) {
+      const filesArray = Array.from(e.target.files);
+      setSelectedFiles(filesArray);
     }
+  };
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+  };
+
+  const handleDrop = (e: React.DragEvent) => {
+    e.preventDefault();
+    e.stopPropagation();
+    
+    if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
+      const filesArray = Array.from(e.dataTransfer.files);
+      setSelectedFiles(prev => [...prev, ...filesArray]);
+    }
+  };
+
+  const removeFile = (index: number) => {
+    setSelectedFiles(prev => prev.filter((_, i) => i !== index));
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!selectedFile) {
-      showToast('الرجاء اختيار ملف', 'error');
+    if (selectedFiles.length === 0) {
+      showToast('الرجاء اختيار ملف واحد على الأقل', 'error');
       return;
     }
 
@@ -70,22 +91,39 @@ export function UploadDocumentModal({ isOpen, onClose, onSuccess, companyId, fol
     }
 
     setIsLoading(true);
+    setUploadProgress({});
 
     try {
-      await apiClient.uploadDocument(selectedFile, formData);
-      showToast('تم رفع المستند بنجاح! ✅', 'success');
+      if (selectedFiles.length === 1) {
+        // Single file upload (use existing endpoint)
+        await apiClient.uploadDocument(selectedFiles[0], formData);
+        showToast('تم رفع المستند بنجاح! ✅', 'success');
+      } else {
+        // Multiple files upload
+        const uploadedDocs = await apiClient.uploadMultipleDocuments(
+          formData.companyId,
+          selectedFiles,
+          {
+            category: formData.category,
+            folderId: formData.folderId || undefined,
+          }
+        );
+        showToast(`تم رفع ${uploadedDocs.length} ملف بنجاح! ✅`, 'success');
+      }
       onSuccess();
       handleClose();
     } catch (error: any) {
-      console.error('Error uploading document:', error);
-      showToast(error.response?.data?.error?.message || 'فشل في رفع المستند', 'error');
+      console.error('Error uploading document(s):', error);
+      showToast(error.response?.data?.error?.message || 'فشل في رفع الملفات', 'error');
     } finally {
       setIsLoading(false);
+      setUploadProgress({});
     }
   };
 
   const handleClose = () => {
-    setSelectedFile(null);
+    setSelectedFiles([]);
+    setUploadProgress({});
     setFormData({
       companyId: companyId || '',
       folderId: folderId || null,
@@ -116,10 +154,10 @@ export function UploadDocumentModal({ isOpen, onClose, onSuccess, companyId, fol
             </div>
             <div>
               <h3 className="text-xl font-bold text-gray-900 dark:text-white">
-                رفع مستند جديد
+                رفع مستند/مستندات جديدة
               </h3>
               <p className="text-sm text-gray-500 dark:text-gray-400">
-                اختر ملف وأدخل التفاصيل
+                اختر ملف أو أكثر وأدخل التفاصيل
               </p>
             </div>
           </div>
@@ -138,31 +176,63 @@ export function UploadDocumentModal({ isOpen, onClose, onSuccess, companyId, fol
           {/* File Upload */}
           <div>
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-              الملف <span className="text-red-500">*</span>
+              الملف/الملفات <span className="text-red-500">*</span>
             </label>
-            <div className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-8 text-center hover:border-blue-500 dark:hover:border-blue-400 transition-colors">
-              {selectedFile ? (
+            <div
+              className="border-2 border-dashed border-gray-300 dark:border-gray-600 rounded-xl p-8 text-center hover:border-blue-500 dark:hover:border-blue-400 transition-colors"
+              onDragOver={handleDragOver}
+              onDrop={handleDrop}
+            >
+              {selectedFiles.length > 0 ? (
                 <div className="space-y-4">
-                  <div className="w-16 h-16 bg-blue-100 dark:bg-blue-900/30 rounded-xl flex items-center justify-center mx-auto">
-                    <svg className="w-8 h-8 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-                    </svg>
+                  <div className="space-y-2 max-h-60 overflow-y-auto">
+                    {selectedFiles.map((file, index) => (
+                      <div
+                        key={index}
+                        className="flex items-center justify-between p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg"
+                      >
+                        <div className="flex items-center gap-3 flex-1 min-w-0">
+                          <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center flex-shrink-0">
+                            <svg className="w-5 h-5 text-blue-600 dark:text-blue-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
+                            </svg>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="font-medium text-gray-900 dark:text-white text-sm truncate">
+                              {file.name}
+                            </p>
+                            <p className="text-xs text-gray-500 dark:text-gray-400">
+                              {formatFileSize(file.size)}
+                            </p>
+                          </div>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => removeFile(index)}
+                          className="ml-2 p-1 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded transition-colors"
+                        >
+                          <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                          </svg>
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                  <div>
-                    <p className="font-medium text-gray-900 dark:text-white">
-                      {selectedFile.name}
+                  <div className="pt-2 border-t border-gray-200 dark:border-gray-700">
+                    <p className="text-sm text-gray-600 dark:text-gray-400 mb-2">
+                      إجمالي: {selectedFiles.length} ملف ({selectedFiles.reduce((sum, f) => sum + f.size, 0) > 0 ? formatFileSize(selectedFiles.reduce((sum, f) => sum + f.size, 0)) : '0 B'})
                     </p>
-                    <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                      {formatFileSize(selectedFile.size)}
-                    </p>
+                    <label className="inline-block px-4 py-2 bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300 rounded-lg cursor-pointer transition-colors text-sm">
+                      <span>إضافة ملفات أخرى</span>
+                      <input
+                        type="file"
+                        onChange={handleFileChange}
+                        className="hidden"
+                        accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
+                        multiple
+                      />
+                    </label>
                   </div>
-                  <button
-                    type="button"
-                    onClick={() => setSelectedFile(null)}
-                    className="text-sm text-red-600 dark:text-red-400 hover:underline"
-                  >
-                    إزالة الملف
-                  </button>
                 </div>
               ) : (
                 <>
@@ -172,19 +242,20 @@ export function UploadDocumentModal({ isOpen, onClose, onSuccess, companyId, fol
                     </svg>
                   </div>
                   <p className="text-gray-600 dark:text-gray-400 mb-2">
-                    اسحب الملف هنا أو
+                    اسحب الملفات هنا أو
                   </p>
                   <label className="inline-block px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-lg cursor-pointer transition-colors">
-                    <span>اختر ملف</span>
+                    <span>اختر ملفات</span>
                     <input
                       type="file"
                       onChange={handleFileChange}
                       className="hidden"
                       accept=".pdf,.doc,.docx,.xls,.xlsx,.jpg,.jpeg,.png"
+                      multiple
                     />
                   </label>
                   <p className="text-xs text-gray-500 dark:text-gray-400 mt-2">
-                    PDF, Word, Excel, أو صورة (حتى 10MB)
+                    PDF, Word, Excel, أو صورة (حتى 50MB لكل ملف)
                   </p>
                 </>
               )}
@@ -258,7 +329,7 @@ export function UploadDocumentModal({ isOpen, onClose, onSuccess, companyId, fol
             </button>
             <button
               type="submit"
-              disabled={isLoading || !selectedFile}
+              disabled={isLoading || selectedFiles.length === 0}
               className="px-6 py-3 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-medium transition-all disabled:opacity-50 disabled:cursor-not-allowed shadow-lg shadow-blue-500/30 hover:shadow-blue-500/50 hover:scale-105 flex items-center gap-2"
             >
               {isLoading ? (
@@ -274,7 +345,7 @@ export function UploadDocumentModal({ isOpen, onClose, onSuccess, companyId, fol
                   <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M7 16a4 4 0 01-.88-7.903A5 5 0 1115.9 6L16 6a5 5 0 011 9.9M15 13l-3-3m0 0l-3 3m3-3v12" />
                   </svg>
-                  رفع المستند
+                  {selectedFiles.length > 1 ? `رفع ${selectedFiles.length} ملف` : 'رفع المستند'}
                 </>
               )}
             </button>

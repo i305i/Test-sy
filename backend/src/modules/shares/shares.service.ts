@@ -96,7 +96,7 @@ export class SharesService {
     });
   }
 
-  async findAll(companyId: string, userId: string) {
+  async findAll(companyId: string, userId: string, userRole?: string) {
     // Check company access
     const company = await this.prisma.company.findUnique({
       where: { id: companyId },
@@ -106,8 +106,21 @@ export class SharesService {
       throw new NotFoundException('الشركة غير موجودة');
     }
 
-    if (company.ownerId !== userId) {
-      throw new ForbiddenException('فقط مالك الشركة يمكنه رؤية المشاركات');
+    // Check if user has access: admin, supervisor, owner, or has active share
+    const hasAccess =
+      userRole === 'ADMIN' ||
+      userRole === 'SUPERVISOR' ||
+      company.ownerId === userId ||
+      (await this.prisma.companyShare.findFirst({
+        where: {
+          companyId,
+          sharedWithUserId: userId,
+          status: 'ACTIVE',
+        },
+      }));
+
+    if (!hasAccess) {
+      throw new ForbiddenException('فقط مالك الشركة أو المشرف أو المستخدمين المشاركين يمكنهم رؤية المشاركات');
     }
 
     return this.prisma.companyShare.findMany({

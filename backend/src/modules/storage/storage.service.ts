@@ -19,7 +19,11 @@ export class StorageService implements OnModuleInit {
       secretKey: this.configService.get('MINIO_SECRET_KEY') || 'minioadmin',
     });
 
-    this.bucketName = this.configService.get('MINIO_BUCKET') || 'company-docs';
+    // دعم كلا الاسمين: MINIO_BUCKET و MINIO_BUCKET_NAME
+    this.bucketName = 
+      this.configService.get('MINIO_BUCKET') || 
+      this.configService.get('MINIO_BUCKET_NAME') || 
+      'company-docs';
   }
 
   async onModuleInit() {

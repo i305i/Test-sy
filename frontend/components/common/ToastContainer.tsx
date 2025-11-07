@@ -40,7 +40,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
       {children}
       
       {/* Toast Container */}
-      <div className="fixed top-4 left-4 z-[9999] space-y-2">
+      <div className="fixed top-4 left-4 z-[9999] space-y-2" suppressHydrationWarning>
         {toasts.map((toast) => (
           <Toast
             key={toast.id}

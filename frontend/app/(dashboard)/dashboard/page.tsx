@@ -15,14 +15,31 @@ interface DashboardStats {
   pendingReviews: number;
 }
 
+interface Employee {
+  id: string;
+  firstName: string;
+  lastName: string;
+  email: string;
+  companies: any[];
+  activities: any[];
+  totalCompanies: number;
+  totalDocuments: number;
+}
+
 export default function DashboardPage() {
   const { user } = useAuth();
   const [stats, setStats] = useState<DashboardStats | null>(null);
   const [isLoading, setIsLoading] = useState(true);
+  const [employees, setEmployees] = useState<Employee[]>([]);
+  const [selectedEmployee, setSelectedEmployee] = useState<Employee | null>(null);
+  const [isLoadingEmployees, setIsLoadingEmployees] = useState(false);
 
   useEffect(() => {
     fetchDashboardData();
-  }, []);
+    if (user?.role !== 'EMPLOYEE') {
+      fetchEmployees();
+    }
+  }, [user]);
 
   const fetchDashboardData = async () => {
     try {
@@ -42,6 +59,51 @@ export default function DashboardPage() {
     } finally {
       setIsLoading(false);
     }
+  };
+
+  const fetchEmployees = async () => {
+    try {
+      setIsLoadingEmployees(true);
+      const data = await apiClient.getEmployeesWithCompanies();
+      setEmployees(data);
+    } catch (error) {
+      console.error('Error fetching employees:', error);
+      setEmployees([]);
+    } finally {
+      setIsLoadingEmployees(false);
+    }
+  };
+
+  const formatActivityTime = (date: string) => {
+    const now = new Date();
+    const activityDate = new Date(date);
+    const diffMs = now.getTime() - activityDate.getTime();
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMs / 3600000);
+    const diffDays = Math.floor(diffMs / 86400000);
+
+    if (diffMins < 60) {
+      return `منذ ${diffMins} دقيقة`;
+    } else if (diffHours < 24) {
+      return `منذ ${diffHours} ساعة`;
+    } else if (diffDays < 7) {
+      return `منذ ${diffDays} يوم`;
+    } else {
+      return activityDate.toLocaleDateString('ar-SA');
+    }
+  };
+
+  const getActivityLabel = (action: string) => {
+    const labels: Record<string, string> = {
+      COMPANY_CREATED: 'إنشاء شركة',
+      COMPANY_UPDATED: 'تحديث شركة',
+      DOCUMENT_UPLOADED: 'رفع مستند',
+      DOCUMENT_APPROVED: 'الموافقة على مستند',
+      DOCUMENT_REJECTED: 'رفض مستند',
+      DOCUMENT_DOWNLOADED: 'تحميل مستند',
+      COMPANY_SHARED: 'مشاركة شركة',
+    };
+    return labels[action] || action;
   };
 
   if (isLoading) {
@@ -308,80 +370,141 @@ export default function DashboardPage() {
         </div>
       </div>
 
-      {/* Recent Companies */}
-      <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">
-            الشركات الأخيرة
-          </h2>
-          <Link
-            href="/companies"
-            className="text-sm text-blue-600 dark:text-blue-400 hover:underline"
-          >
-            عرض الكل
-          </Link>
-        </div>
-        <div className="overflow-x-auto">
-          <table className="min-w-full divide-y divide-gray-200 dark:divide-gray-700">
-            <thead>
-              <tr>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                  اسم الشركة
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                  النوع
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                  الحالة
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                  المستندات
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-medium text-gray-500 dark:text-gray-400 uppercase">
-                  التاريخ
-                </th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200 dark:divide-gray-700">
-              {[1, 2, 3].map((i) => (
-                <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                  <td className="px-4 py-4 whitespace-nowrap">
-                    <div className="flex items-center">
-                      <div className="w-10 h-10 bg-blue-100 dark:bg-blue-900/30 rounded-lg flex items-center justify-center ml-3">
-                        <span className="text-blue-600 dark:text-blue-400 font-bold">
-                          {String.fromCharCode(65 + i)}
+      {/* Employees Section */}
+      {user?.role !== 'EMPLOYEE' && (
+        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-bold text-gray-900 dark:text-gray-100">
+              الموظفين
+            </h2>
+          </div>
+          {isLoadingEmployees ? (
+            <div className="flex items-center justify-center py-8">
+              <LoadingSpinner />
+            </div>
+          ) : employees.length === 0 ? (
+            <p className="text-center text-gray-500 dark:text-gray-400 py-8">
+              لا يوجد موظفين
+            </p>
+          ) : (
+            <div className="space-y-4">
+              {employees.map((employee) => (
+                <div
+                  key={employee.id}
+                  className={`p-4 border rounded-lg cursor-pointer transition-all ${
+                    selectedEmployee?.id === employee.id
+                      ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                      : 'border-gray-200 dark:border-gray-700 hover:border-blue-300 dark:hover:border-blue-700'
+                  }`}
+                  onClick={() => setSelectedEmployee(selectedEmployee?.id === employee.id ? null : employee)}
+                >
+                  <div className="flex items-center justify-between">
+                    <div className="flex items-center gap-4">
+                      <div className="w-12 h-12 bg-blue-100 dark:bg-blue-900/30 rounded-full flex items-center justify-center">
+                        <span className="text-blue-600 dark:text-blue-400 font-bold text-lg">
+                          {employee.firstName[0]}{employee.lastName[0]}
                         </span>
                       </div>
                       <div>
-                        <p className="font-medium text-gray-900 dark:text-gray-100">
-                          شركة التقنية {i}
+                        <p className="font-semibold text-gray-900 dark:text-white">
+                          {employee.firstName} {employee.lastName}
                         </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-400">
-                          CR-{1000 + i}
+                        <p className="text-sm text-gray-500 dark:text-gray-400">
+                          {employee.email}
                         </p>
+                        <div className="flex items-center gap-4 mt-1 text-xs text-gray-500 dark:text-gray-400">
+                          <span>{employee.totalCompanies} شركة</span>
+                          <span>•</span>
+                          <span>{employee.totalDocuments} مستند</span>
+                        </div>
                       </div>
                     </div>
-                  </td>
-                  <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">
-                    شركة ذات مسؤولية محدودة
-                  </td>
-                  <td className="px-4 py-4 whitespace-nowrap">
-                    <span className="px-3 py-1 text-xs font-semibold rounded-full bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-400">
-                      جاهزة
-                    </span>
-                  </td>
-                  <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-600 dark:text-gray-400">
-                    {5 + i} مستندات
-                  </td>
-                  <td className="px-4 py-4 whitespace-nowrap text-sm text-gray-500 dark:text-gray-400">
-                    {new Date().toLocaleDateString('ar-SA')}
-                  </td>
-                </tr>
+                    <svg
+                      className={`w-5 h-5 text-gray-400 transition-transform ${
+                        selectedEmployee?.id === employee.id ? 'rotate-180' : ''
+                      }`}
+                      fill="none"
+                      stroke="currentColor"
+                      viewBox="0 0 24 24"
+                    >
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                    </svg>
+                  </div>
+
+                  {selectedEmployee?.id === employee.id && (
+                    <div className="mt-4 pt-4 border-t border-gray-200 dark:border-gray-700 space-y-4">
+                      {/* Companies */}
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                          الشركات ({employee.companies.length})
+                        </h3>
+                        {employee.companies.length === 0 ? (
+                          <p className="text-sm text-gray-500 dark:text-gray-400">لا توجد شركات</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {employee.companies.map((company: any) => (
+                              <Link
+                                key={company.id}
+                                href={`/companies/${company.id}`}
+                                className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+                              >
+                                <div>
+                                  <p className="text-sm font-medium text-gray-900 dark:text-white">
+                                    {company.name}
+                                  </p>
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">
+                                    {company._count.documents} مستند • {company._count.folders} مجلد
+                                  </p>
+                                </div>
+                                <div className="text-xs text-gray-500 dark:text-gray-400">
+                                  {new Date(company.createdAt).toLocaleDateString('ar-SA')}
+                                </div>
+                              </Link>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Activities */}
+                      <div>
+                        <h3 className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">
+                          الأنشطة الأخيرة ({employee.activities.length})
+                        </h3>
+                        {employee.activities.length === 0 ? (
+                          <p className="text-sm text-gray-500 dark:text-gray-400">لا توجد أنشطة</p>
+                        ) : (
+                          <div className="space-y-2">
+                            {employee.activities.map((activity: any) => (
+                              <div
+                                key={activity.id}
+                                className="flex items-center justify-between p-2 bg-gray-50 dark:bg-gray-700/50 rounded-lg"
+                              >
+                                <div>
+                                  <p className="text-sm text-gray-900 dark:text-white">
+                                    {getActivityLabel(activity.action)}
+                                  </p>
+                                  {activity.details && typeof activity.details === 'object' && (
+                                    <p className="text-xs text-gray-500 dark:text-gray-400">
+                                      {activity.details.fileName || activity.details.companyName || ''}
+                                    </p>
+                                  )}
+                                </div>
+                                <span className="text-xs text-gray-500 dark:text-gray-400">
+                                  {formatActivityTime(activity.createdAt)}
+                                </span>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
               ))}
-            </tbody>
-          </table>
+            </div>
+          )}
         </div>
-      </div>
+      )}
     </div>
   );
 }

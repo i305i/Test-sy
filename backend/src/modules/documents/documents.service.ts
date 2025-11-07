@@ -3,7 +3,10 @@ import { PrismaService } from '../../database/prisma.service';
 import { StorageService } from '../storage/storage.service';
 import { UploadDocumentDto } from './dto/upload-document.dto';
 import { UpdateDocumentDto } from './dto/update-document.dto';
+import { ShareDocumentDto } from './dto/share-document.dto';
 import * as crypto from 'crypto';
+import archiver from 'archiver';
+import { Readable } from 'stream';
 
 @Injectable()
 export class DocumentsService {
@@ -292,6 +295,113 @@ export class DocumentsService {
     };
   }
 
+  async findAllDocuments(query: any, userId: string, userRole: string) {
+    const { page = 1, limit = 20, category, status, search, companyId } = query;
+    const skip = (page - 1) * limit;
+
+    // Build where clause based on user role
+    const where: any = {
+      isLatestVersion: true,
+    };
+
+    // Filter by company if specified
+    if (companyId) {
+      where.companyId = companyId;
+    } else if (userRole === 'EMPLOYEE') {
+      // For employees, only show documents from companies they own or have access to
+      const userCompanies = await this.prisma.company.findMany({
+        where: {
+          OR: [
+            { ownerId: userId },
+            {
+              shares: {
+                some: {
+                  sharedWithUserId: userId,
+                  status: 'ACTIVE',
+                },
+              },
+            },
+          ],
+        },
+        select: { id: true },
+      });
+      where.companyId = { in: userCompanies.map(c => c.id) };
+    }
+
+    if (category) {
+      where.category = category;
+    }
+
+    if (status) {
+      where.status = status;
+    }
+
+    if (search) {
+      where.OR = [
+        { name: { contains: search, mode: 'insensitive' } },
+        { description: { contains: search, mode: 'insensitive' } },
+        { originalName: { contains: search, mode: 'insensitive' } },
+        { company: { name: { contains: search, mode: 'insensitive' } } },
+      ];
+    }
+
+    const [documents, total] = await Promise.all([
+      this.prisma.document.findMany({
+        where,
+        skip,
+        take: limit,
+        include: {
+          company: {
+            select: {
+              id: true,
+              name: true,
+            },
+          },
+          uploadedBy: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+          approvedBy: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+            },
+          },
+        },
+        orderBy: {
+          uploadedAt: 'desc',
+        },
+      }),
+      this.prisma.document.count({ where }),
+    ]);
+
+    // Generate download URLs
+    const documentsWithUrls = await Promise.all(
+      documents.map(async (doc) => ({
+        ...doc,
+        fileSize: Number(doc.fileSize),
+        downloadUrl: await this.storageService.getFileUrl(doc.filePath),
+        fileName: doc.name,
+        createdAt: doc.uploadedAt,
+      })),
+    );
+
+    return {
+      documents: documentsWithUrls,
+      pagination: {
+        page,
+        limit,
+        total,
+        totalPages: Math.ceil(total / limit),
+      },
+    };
+  }
+
   async update(id: string, updateDto: UpdateDocumentDto, userId: string, userRole: string) {
     const document = await this.findOne(id, userId, userRole);
 
@@ -375,12 +485,12 @@ export class DocumentsService {
   async download(id: string, userId: string, userRole: string) {
     const document = await this.findOne(id, userId, userRole);
     
-    // Generate long-lived presigned URL for download
-    const downloadUrl = await this.storageService.getFileUrl(document.filePath, 3600);
+    // Get file stream from storage
+    const stream = await this.storageService.getFileStream(document.filePath);
 
     return {
-      url: downloadUrl,
-      filename: document.originalName,
+      stream,
+      fileName: document.originalName,
       mimeType: document.mimeType,
     };
   }
@@ -561,6 +671,614 @@ export class DocumentsService {
       mimeType: downloadToken.document.mimeType,
       fileName: downloadToken.document.originalName,
     };
+  }
+
+  async uploadMultiple(
+    companyId: string,
+    files: Express.Multer.File[],
+    options: { category: string; folderId?: string },
+    userId: string,
+  ) {
+    if (!files || files.length === 0) {
+      throw new BadRequestException('لم يتم اختيار أي ملفات');
+    }
+
+    // Check company exists and user has access
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      include: {
+        shares: {
+          where: {
+            sharedWithUserId: userId,
+            status: 'ACTIVE',
+          },
+        },
+      },
+    });
+
+    if (!company) {
+      throw new NotFoundException('الشركة غير موجودة');
+    }
+
+    // Check permission
+    const hasAccess = 
+      company.ownerId === userId ||
+      company.shares.some(s => s.permissionLevel !== 'VIEW');
+
+    if (!hasAccess) {
+      throw new ForbiddenException('ليس لديك صلاحية لرفع ملفات لهذه الشركة');
+    }
+
+    const uploadedDocuments: any[] = [];
+
+    for (const file of files) {
+      try {
+        const uploadDto: UploadDocumentDto = {
+          name: file.originalname,
+          category: options.category,
+          folderId: options.folderId,
+        };
+
+        const document = await this.upload(companyId, file, uploadDto, userId);
+        uploadedDocuments.push(document);
+      } catch (error) {
+        console.error(`Error uploading file ${file.originalname}:`, error);
+        // Continue with other files even if one fails
+      }
+    }
+
+    return uploadedDocuments;
+  }
+
+  async replaceFile(
+    companyId: string,
+    documentId: string,
+    file: Express.Multer.File,
+    userId: string,
+  ) {
+    // Check document exists and user has access
+    const document = await this.findOne(documentId, userId, 'EMPLOYEE');
+
+    if (document.companyId !== companyId) {
+      throw new BadRequestException('الملف لا ينتمي لهذه الشركة');
+    }
+
+    // Check permission
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      include: {
+        shares: {
+          where: {
+            sharedWithUserId: userId,
+            status: 'ACTIVE',
+          },
+        },
+      },
+    });
+
+    if (!company) {
+      throw new NotFoundException('الشركة غير موجودة');
+    }
+
+    const hasAccess = 
+      company.ownerId === userId ||
+      company.shares.some(s => s.permissionLevel !== 'VIEW');
+
+    if (!hasAccess) {
+      throw new ForbiddenException('ليس لديك صلاحية لاستبدال هذا الملف');
+    }
+
+    // Upload new file
+    let storagePath = `companies/${companyId}`;
+    if (document.folderId) {
+      storagePath = `${storagePath}/folders/${document.folderId}`;
+    } else {
+      storagePath = `${storagePath}/documents`;
+    }
+
+    const { key, url } = await this.storageService.uploadFile(file, storagePath);
+
+    // Calculate checksum
+    const checksum = crypto
+      .createHash('sha256')
+      .update(file.buffer)
+      .digest('hex');
+
+    // Mark old version as not latest
+    await this.prisma.document.update({
+      where: { id: documentId },
+      data: { isLatestVersion: false },
+    });
+
+    // Create new version
+    const newVersion = await this.prisma.document.create({
+      data: {
+        companyId,
+        folderId: document.folderId,
+        name: document.name, // Keep same name
+        originalName: file.originalname,
+        filePath: key,
+        fileSize: BigInt(file.size),
+        mimeType: file.mimetype,
+        extension: file.originalname.split('.').pop(),
+        checksum,
+        category: document.category,
+        version: document.version + 1,
+        parentDocumentId: documentId,
+        isLatestVersion: true,
+        uploadedById: userId,
+        status: 'PENDING',
+      },
+      include: {
+        uploadedBy: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+      },
+    });
+
+    return {
+      ...newVersion,
+      fileSize: Number(newVersion.fileSize),
+      downloadUrl: url,
+    };
+  }
+
+  async downloadAllAsZip(
+    companyId: string,
+    userId: string,
+    userRole: string,
+  ): Promise<{ stream: Readable; fileName: string }> {
+    // Check company access
+    const company = await this.prisma.company.findUnique({
+      where: { id: companyId },
+      include: {
+        shares: {
+          where: {
+            sharedWithUserId: userId,
+            status: 'ACTIVE',
+          },
+        },
+      },
+    });
+
+    if (!company) {
+      throw new NotFoundException('الشركة غير موجودة');
+    }
+
+    // Check permission
+    if (userRole === 'EMPLOYEE') {
+      const hasAccess = 
+        company.ownerId === userId ||
+        company.shares.length > 0;
+
+      if (!hasAccess) {
+        throw new ForbiddenException('ليس لديك صلاحية للوصول لهذه الشركة');
+      }
+    }
+
+    // Get all documents for this company (latest versions only)
+    const documents = await this.prisma.document.findMany({
+      where: {
+        companyId,
+        isLatestVersion: true,
+      },
+      include: {
+        folder: {
+          select: {
+            name: true,
+            parentId: true,
+          },
+        },
+      },
+      orderBy: {
+        uploadedAt: 'desc',
+      },
+    });
+
+    if (documents.length === 0) {
+      throw new NotFoundException('لا توجد ملفات للتحميل');
+    }
+
+    // Create ZIP archive
+    const archive = archiver('zip', {
+      zlib: { level: 9 }, // Maximum compression
+    });
+
+    // Build folder structure
+    const folderMap = new Map<string, { name: string; path: string }>();
+    
+    // Get all folders
+    const folders = await this.prisma.folder.findMany({
+      where: { companyId },
+    });
+
+    // Build folder paths
+    const getFolderPath = (folderId: string | null): string => {
+      if (!folderId) return '';
+      
+      const folder = folders.find(f => f.id === folderId);
+      if (!folder) return '';
+      
+      if (folder.parentId) {
+        const parentPath = getFolderPath(folder.parentId);
+        return parentPath ? `${parentPath}/${folder.name}` : folder.name;
+      }
+      return folder.name;
+    };
+
+    // Add files to archive
+    for (const doc of documents) {
+      try {
+        const fileStream = await this.storageService.getFileStream(doc.filePath);
+        const folderPath = doc.folderId ? getFolderPath(doc.folderId) : '';
+        const archivePath = folderPath 
+          ? `${folderPath}/${doc.originalName}` 
+          : doc.originalName;
+        
+        archive.append(fileStream, { name: archivePath });
+      } catch (error) {
+        console.error(`Error adding file ${doc.name} to archive:`, error);
+        // Continue with other files
+      }
+    }
+
+    // Finalize archive
+    archive.finalize();
+
+    const fileName = `${company.name.replace(/[^a-zA-Z0-9]/g, '_')}_${Date.now()}.zip`;
+
+    return {
+      stream: archive as any,
+      fileName,
+    };
+  }
+
+  // ============================================================================
+  // Document Sharing
+  // ============================================================================
+
+  async shareDocument(
+    documentId: string,
+    companyId: string,
+    shareDto: ShareDocumentDto,
+    userId: string,
+    userRole: string,
+  ) {
+    // Check document exists
+    const document = await this.prisma.document.findUnique({
+      where: { id: documentId },
+      include: {
+        company: true,
+      },
+    });
+
+    if (!document) {
+      throw new NotFoundException('المستند غير موجود');
+    }
+
+    if (document.companyId !== companyId) {
+      throw new BadRequestException('المستند لا ينتمي لهذه الشركة');
+    }
+
+    // Check permission: Only owner, admin, or supervisor can share
+    const canShare =
+      userRole === 'ADMIN' ||
+      userRole === 'SUPERVISOR' ||
+      document.company.ownerId === userId ||
+      document.uploadedById === userId;
+
+    if (!canShare) {
+      throw new ForbiddenException('فقط مالك المستند أو المدير أو المشرف يمكنهم مشاركة المستند');
+    }
+
+    // Check if user exists
+    const userToShare = await this.prisma.user.findUnique({
+      where: { id: shareDto.sharedWithUserId },
+    });
+
+    if (!userToShare) {
+      throw new NotFoundException('المستخدم المراد المشاركة معه غير موجود');
+    }
+
+    // Check if already shared
+    const existingShare = await (this.prisma as any).documentShare.findUnique({
+      where: {
+        documentId_sharedWithUserId: {
+          documentId,
+          sharedWithUserId: shareDto.sharedWithUserId,
+        },
+      },
+    });
+
+    if (existingShare && existingShare.status === 'ACTIVE') {
+      throw new BadRequestException('المستند مشارك مسبقاً مع هذا المستخدم');
+    }
+
+    // Create or reactivate share
+    if (existingShare) {
+      return (this.prisma as any).documentShare.update({
+        where: { id: existingShare.id },
+        data: {
+          status: 'ACTIVE',
+          permissionLevel: shareDto.permissionLevel as any,
+          note: shareDto.note,
+          validUntil: shareDto.validUntil ? new Date(shareDto.validUntil) : null,
+          revokedAt: null,
+        },
+        include: {
+          sharedWithUser: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+          sharedByUser: {
+            select: {
+              id: true,
+              firstName: true,
+              lastName: true,
+              email: true,
+            },
+          },
+        },
+      });
+    }
+
+    return (this.prisma as any).documentShare.create({
+      data: {
+        documentId,
+        sharedWithUserId: shareDto.sharedWithUserId,
+        sharedByUserId: userId,
+        permissionLevel: shareDto.permissionLevel as any,
+        note: shareDto.note,
+        validUntil: shareDto.validUntil ? new Date(shareDto.validUntil) : null,
+      },
+      include: {
+        sharedWithUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+        sharedByUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+      },
+    });
+  }
+
+  async getDocumentShares(documentId: string, userId: string, userRole: string) {
+    // Check document exists
+    const document = await this.prisma.document.findUnique({
+      where: { id: documentId },
+      include: {
+        company: true,
+      },
+    });
+
+    if (!document) {
+      throw new NotFoundException('المستند غير موجود');
+    }
+
+    // Check access: owner, admin, supervisor, or has active share
+    const hasAccess =
+      userRole === 'ADMIN' ||
+      userRole === 'SUPERVISOR' ||
+      document.company.ownerId === userId ||
+      document.uploadedById === userId ||
+      (await (this.prisma as any).documentShare.findFirst({
+        where: {
+          documentId,
+          sharedWithUserId: userId,
+          status: 'ACTIVE',
+        },
+      }));
+
+    if (!hasAccess) {
+      throw new ForbiddenException('ليس لديك صلاحية لعرض مشاركات هذا المستند');
+    }
+
+    return (this.prisma as any).documentShare.findMany({
+      where: {
+        documentId,
+        status: 'ACTIVE',
+      },
+      include: {
+        sharedWithUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+            avatarUrl: true,
+          },
+        },
+        sharedByUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+  }
+
+  async updateDocumentShare(
+    shareId: string,
+    permissionLevel: string,
+    userId: string,
+    userRole: string,
+  ) {
+    const share = await (this.prisma as any).documentShare.findUnique({
+      where: { id: shareId },
+      include: {
+        document: {
+          include: {
+            company: true,
+          },
+        },
+      },
+    });
+
+    if (!share) {
+      throw new NotFoundException('المشاركة غير موجودة');
+    }
+
+    // Check permission: Only admin, supervisor, or document owner can update
+    const canUpdate =
+      userRole === 'ADMIN' ||
+      userRole === 'SUPERVISOR' ||
+      share.document.company.ownerId === userId ||
+      share.document.uploadedById === userId;
+
+    if (!canUpdate) {
+      throw new ForbiddenException('فقط مالك المستند أو المدير أو المشرف يمكنهم تعديل الصلاحيات');
+    }
+
+    return (this.prisma as any).documentShare.update({
+      where: { id: shareId },
+      data: {
+        permissionLevel: permissionLevel as any,
+      },
+      include: {
+        sharedWithUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+        sharedByUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+      },
+    });
+  }
+
+  async revokeDocumentShare(shareId: string, userId: string, userRole: string) {
+    const share = await (this.prisma as any).documentShare.findUnique({
+      where: { id: shareId },
+      include: {
+        document: {
+          include: {
+            company: true,
+          },
+        },
+      },
+    });
+
+    if (!share) {
+      throw new NotFoundException('المشاركة غير موجودة');
+    }
+
+    // Check permission: Only admin, supervisor, or document owner can revoke
+    const canRevoke =
+      userRole === 'ADMIN' ||
+      userRole === 'SUPERVISOR' ||
+      share.document.company.ownerId === userId ||
+      share.document.uploadedById === userId;
+
+    if (!canRevoke) {
+      throw new ForbiddenException('فقط مالك المستند أو المدير أو المشرف يمكنهم إلغاء المشاركة');
+    }
+
+    return (this.prisma as any).documentShare.update({
+      where: { id: shareId },
+      data: {
+        status: 'REVOKED',
+        revokedAt: new Date(),
+      },
+    });
+  }
+
+  async getDocumentsSharedByUser(userId: string, companyId?: string) {
+    const where: any = {
+      sharedByUserId: userId,
+      status: 'ACTIVE',
+    };
+
+    const shares = await (this.prisma as any).documentShare.findMany({
+      where,
+      include: {
+        document: {
+          include: {
+            company: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+            uploadedBy: {
+              select: {
+                id: true,
+                firstName: true,
+                lastName: true,
+                email: true,
+              },
+            },
+            folder: {
+              select: {
+                id: true,
+                name: true,
+              },
+            },
+          },
+        },
+        sharedWithUser: {
+          select: {
+            id: true,
+            firstName: true,
+            lastName: true,
+            email: true,
+          },
+        },
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    // Filter by company if provided
+    let filteredShares = shares;
+    if (companyId) {
+      filteredShares = shares.filter((share: any) => share.document.companyId === companyId);
+    }
+
+    return filteredShares.map((share: any) => ({
+      shareId: share.id,
+      document: {
+        ...share.document,
+        fileSize: Number(share.document.fileSize),
+      },
+      sharedWith: share.sharedWithUser,
+      permissionLevel: share.permissionLevel,
+      createdAt: share.createdAt,
+    }));
   }
 }
 

@@ -43,6 +43,8 @@ model User {
   
   sharesGiven       CompanyShare[] @relation("ShareGiver")
   sharesReceived    CompanyShare[] @relation("ShareReceiver")
+  documentSharesGiven    DocumentShare[] @relation("DocumentShareGiver")
+  documentSharesReceived DocumentShare[] @relation("DocumentShareReceiver")
   accessRequests    AccessRequest[]
   foldersCreated    Folder[] @relation("FolderCreator")
   downloadTokens    DownloadToken[]
@@ -209,7 +211,10 @@ model Document {
   
   // Download Tokens
   downloadTokens      DownloadToken[]
-  
+
+  // Shares
+  shares              DocumentShare[]
+
   @@index([companyId])
   @@index([category])
   @@index([status])
@@ -315,6 +320,38 @@ enum ShareStatus {
   ACTIVE
   REVOKED
   EXPIRED
+}
+
+// ============================================================================
+// Document Share Model
+// ============================================================================
+model DocumentShare {
+  id                  String           @id @default(uuid())
+  documentId          String           @map("document_id")
+  document            Document         @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  sharedWithUserId    String           @map("shared_with_user_id")
+  sharedWithUser      User             @relation("DocumentShareReceiver", fields: [sharedWithUserId], references: [id], onDelete: Cascade)
+  sharedByUserId      String           @map("shared_by_user_id")
+  sharedByUser        User             @relation("DocumentShareGiver", fields: [sharedByUserId], references: [id])
+  
+  permissionLevel     PermissionLevel  @map("permission_level")
+  
+  validFrom           DateTime         @default(now()) @map("valid_from")
+  validUntil          DateTime?        @map("valid_until")
+  
+  status              ShareStatus      @default(ACTIVE)
+  notified            Boolean          @default(false)
+  note                String?
+  
+  createdAt           DateTime         @default(now()) @map("created_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
+  revokedAt           DateTime?        @map("revoked_at")
+  
+  @@unique([documentId, sharedWithUserId])
+  @@index([documentId])
+  @@index([sharedWithUserId])
+  @@index([status])
+  @@map("document_shares")
 }
 
 // ============================================================================

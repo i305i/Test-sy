@@ -182,5 +182,87 @@ export class DashboardService {
 
     return monthlyData;
   }
+
+  async getEmployeesWithCompanies(userId: string, userRole: string) {
+    // Only admins and supervisors can see all employees
+    if (userRole === 'EMPLOYEE') {
+      throw new Error('ليس لديك صلاحية لعرض الموظفين');
+    }
+
+    const employees = await this.prisma.user.findMany({
+      where: {
+        role: 'EMPLOYEE',
+        status: 'ACTIVE',
+      },
+      select: {
+        id: true,
+        firstName: true,
+        lastName: true,
+        email: true,
+        avatarUrl: true,
+        createdAt: true,
+        lastLoginAt: true,
+      },
+      orderBy: {
+        createdAt: 'desc',
+      },
+    });
+
+    // Get companies and activities for each employee
+    const employeesWithData = await Promise.all(
+      employees.map(async (employee) => {
+        // Get companies owned by this employee
+        const companies = await this.prisma.company.findMany({
+          where: {
+            ownerId: employee.id,
+          },
+          select: {
+            id: true,
+            name: true,
+            status: true,
+            createdAt: true,
+            _count: {
+              select: {
+                documents: true,
+                folders: true,
+              },
+            },
+          },
+          orderBy: {
+            createdAt: 'desc',
+          },
+        });
+
+        // Get recent activities for this employee
+        const activities = await this.prisma.auditLog.findMany({
+          where: {
+            userId: employee.id,
+          },
+          take: 10,
+          orderBy: {
+            createdAt: 'desc',
+          },
+          select: {
+            id: true,
+            action: true,
+            resourceType: true,
+            resourceId: true,
+            createdAt: true,
+            details: true,
+          },
+        });
+
+        return {
+          ...employee,
+          companies,
+          activities,
+          totalCompanies: companies.length,
+          totalDocuments: companies.reduce((sum, c) => sum + c._count.documents, 0),
+        };
+      }),
+    );
+
+    return employeesWithData;
+  }
 }
 
