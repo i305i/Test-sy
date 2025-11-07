@@ -23,7 +23,7 @@ git push origin main
 
 ```bash
 cd /var/www
-git clone https://github.com/your-username/your-repo.git company-docs
+git clone https://github.com/rayz-511/systeam-sy.git company-docs
 cd company-docs
 ```
 
