@@ -1,0 +1,521 @@
+// Prisma Schema for Company Docs Manager
+// نظام إدارة الشركات والوثائق
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================================================================
+// User Model
+// ============================================================================
+model User {
+  id                String    @id @default(uuid())
+  email             String    @unique
+  passwordHash      String    @map("password_hash")
+  firstName         String    @map("first_name")
+  lastName          String    @map("last_name")
+  phone             String?
+  role              UserRole  @default(EMPLOYEE)
+  status            UserStatus @default(ACTIVE)
+  avatarUrl         String?   @map("avatar_url")
+  lastLoginAt       DateTime? @map("last_login_at")
+  emailVerified     Boolean   @default(false) @map("email_verified")
+  twoFactorEnabled  Boolean   @default(false) @map("two_factor_enabled")
+  twoFactorSecret   String?   @map("two_factor_secret")
+  refreshToken      String?   @map("refresh_token")
+  
+  createdAt         DateTime  @default(now()) @map("created_at")
+  updatedAt         DateTime  @updatedAt @map("updated_at")
+  
+  // Relations
+  ownedCompanies    Company[]  @relation("CompanyOwner")
+  uploadedDocuments Document[] @relation("DocumentUploader")
+  approvedDocuments Document[] @relation("DocumentApprover")
+  comments          Comment[]  @relation("CommentAuthor")
+  notifications     Notification[]
+  sessions          Session[]
+  auditLogs         AuditLog[]
+  
+  sharesGiven       CompanyShare[] @relation("ShareGiver")
+  sharesReceived    CompanyShare[] @relation("ShareReceiver")
+  accessRequests    AccessRequest[]
+  foldersCreated    Folder[] @relation("FolderCreator")
+  downloadTokens    DownloadToken[]
+  
+  @@map("users")
+}
+
+enum UserRole {
+  SUPER_ADMIN
+  ADMIN
+  SUPERVISOR
+  EMPLOYEE
+  AUDITOR
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+// ============================================================================
+// Company Model
+// ============================================================================
+model Company {
+  id                      String       @id @default(uuid())
+  name                    String
+  nameArabic              String?      @map("name_arabic")
+  description             String?
+  companyType             CompanyType? @map("company_type")
+  commercialRegistration  String?      @unique @map("commercial_registration")
+  taxNumber               String?      @map("tax_number")
+  establishmentDate       DateTime?    @map("establishment_date") @db.Date
+  
+  // Address
+  country                 String?
+  city                    String?
+  district                String?
+  street                  String?
+  buildingNumber          String?      @map("building_number")
+  postalCode              String?      @map("postal_code")
+  
+  // Contact
+  primaryEmail            String?      @map("primary_email")
+  primaryPhone            String?      @map("primary_phone")
+  secondaryPhone          String?      @map("secondary_phone")
+  website                 String?
+  
+  // Status
+  status                  CompanyStatus @default(IN_PROGRESS)
+  completionPercentage    Int          @default(0) @map("completion_percentage")
+  
+  // Metadata
+  notes                   String?
+  tags                    String[]
+  customFields            Json?        @map("custom_fields")
+  
+  // Ownership
+  ownerId                 String       @map("owner_id")
+  owner                   User         @relation("CompanyOwner", fields: [ownerId], references: [id])
+  
+  // Timestamps
+  createdAt               DateTime     @default(now()) @map("created_at")
+  updatedAt               DateTime     @updatedAt @map("updated_at")
+  archivedAt              DateTime?    @map("archived_at")
+  
+  // Relations
+  documents               Document[]
+  folders                 Folder[]
+  shares                  CompanyShare[]
+  accessRequests          AccessRequest[]
+  
+  @@index([ownerId])
+  @@index([status])
+  @@index([commercialRegistration])
+  @@map("companies")
+}
+
+enum CompanyType {
+  INDIVIDUAL
+  PARTNERSHIP
+  LLC
+  PUBLIC_COMPANY
+  PRIVATE_COMPANY
+  NON_PROFIT
+}
+
+enum CompanyStatus {
+  READY
+  IN_PROGRESS
+  ON_HOLD
+  ARCHIVED
+}
+
+// ============================================================================
+// Document Model
+// ============================================================================
+model Document {
+  id                  String           @id @default(uuid())
+  companyId           String           @map("company_id")
+  company             Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  // Folder Relation
+  folderId            String?          @map("folder_id")
+  folder              Folder?          @relation("FolderDocuments", fields: [folderId], references: [id], onDelete: SetNull)
+  
+  // File Information
+  name                String
+  originalName        String           @map("original_name")
+  filePath            String           @map("file_path")
+  fileSize            BigInt           @map("file_size")
+  mimeType            String           @map("mime_type")
+  extension           String?
+  
+  // Categorization
+  category            DocumentCategory?
+  documentType        String?          @map("document_type")
+  
+  // Version Control
+  version             Int              @default(1)
+  parentDocumentId    String?          @map("parent_document_id")
+  parentDocument      Document?        @relation("DocumentVersions", fields: [parentDocumentId], references: [id])
+  versions            Document[]       @relation("DocumentVersions")
+  isLatestVersion     Boolean          @default(true) @map("is_latest_version")
+  
+  // Status & Approval
+  status              DocumentStatus   @default(PENDING)
+  approvedById        String?          @map("approved_by")
+  approvedBy          User?            @relation("DocumentApprover", fields: [approvedById], references: [id])
+  approvedAt          DateTime?        @map("approved_at")
+  rejectionReason     String?          @map("rejection_reason")
+  
+  // Expiry
+  issueDate           DateTime?        @map("issue_date") @db.Date
+  expiryDate          DateTime?        @map("expiry_date") @db.Date
+  expiryNotified      Boolean          @default(false) @map("expiry_notified")
+  
+  // Security
+  accessLevel         AccessLevel      @default(INTERNAL)
+  checksum            String?
+  encrypted           Boolean          @default(false)
+  
+  // Metadata
+  description         String?
+  tags                String[]
+  customMetadata      Json?            @map("custom_metadata")
+  
+  // OCR & Content
+  ocrText             String?          @map("ocr_text")
+  ocrProcessed        Boolean          @default(false) @map("ocr_processed")
+  
+  // Storage
+  storageProvider     String           @default("minio") @map("storage_provider")
+  storageBucket       String?          @map("storage_bucket")
+  storageKey          String?          @map("storage_key")
+  
+  // Timestamps
+  uploadedAt          DateTime         @default(now()) @map("uploaded_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
+  
+  // Audit
+  uploadedById        String           @map("uploaded_by")
+  uploadedBy          User             @relation("DocumentUploader", fields: [uploadedById], references: [id])
+  
+  // Download Tokens
+  downloadTokens      DownloadToken[]
+  
+  @@index([companyId])
+  @@index([category])
+  @@index([status])
+  @@index([expiryDate])
+  @@map("documents")
+}
+
+enum DocumentCategory {
+  LEGAL
+  FINANCIAL
+  HR
+  GOVERNMENT
+  CONTRACT
+  REPORT
+  OTHER
+}
+
+enum DocumentStatus {
+  PENDING
+  APPROVED
+  REJECTED
+  EXPIRED
+}
+
+enum AccessLevel {
+  PUBLIC
+  INTERNAL
+  CONFIDENTIAL
+  RESTRICTED
+}
+
+// ============================================================================
+// Folder Model
+// ============================================================================
+model Folder {
+  id          String    @id @default(uuid())
+  name        String
+  path        String    // المسار الكامل مثل: /commercial-registration/2024
+  
+  // العلاقات
+  companyId   String    @map("company_id")
+  company     Company   @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  
+  parentId    String?   @map("parent_id")
+  parent      Folder?   @relation("FolderHierarchy", fields: [parentId], references: [id], onDelete: Cascade)
+  children    Folder[]  @relation("FolderHierarchy")
+  
+  documents   Document[] @relation("FolderDocuments")
+  
+  // Metadata
+  createdById String    @map("created_by")
+  createdBy   User      @relation("FolderCreator", fields: [createdById], references: [id])
+  
+  createdAt   DateTime  @default(now()) @map("created_at")
+  updatedAt   DateTime  @updatedAt @map("updated_at")
+  
+  @@unique([companyId, parentId, name])
+  @@index([companyId])
+  @@index([parentId])
+  @@index([path])
+  @@map("folders")
+}
+
+// ============================================================================
+// Company Share Model
+// ============================================================================
+model CompanyShare {
+  id                  String           @id @default(uuid())
+  companyId           String           @map("company_id")
+  company             Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  sharedWithUserId    String           @map("shared_with_user_id")
+  sharedWithUser      User             @relation("ShareReceiver", fields: [sharedWithUserId], references: [id], onDelete: Cascade)
+  sharedByUserId      String           @map("shared_by_user_id")
+  sharedByUser        User             @relation("ShareGiver", fields: [sharedByUserId], references: [id])
+  
+  permissionLevel     PermissionLevel  @map("permission_level")
+  
+  validFrom           DateTime         @default(now()) @map("valid_from")
+  validUntil          DateTime?        @map("valid_until")
+  
+  status              ShareStatus      @default(ACTIVE)
+  notified            Boolean          @default(false)
+  note                String?
+  
+  createdAt           DateTime         @default(now()) @map("created_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
+  revokedAt           DateTime?        @map("revoked_at")
+  
+  @@unique([companyId, sharedWithUserId])
+  @@index([companyId])
+  @@index([sharedWithUserId])
+  @@index([status])
+  @@map("company_shares")
+}
+
+enum PermissionLevel {
+  VIEW
+  EDIT
+  MANAGE
+}
+
+enum ShareStatus {
+  ACTIVE
+  REVOKED
+  EXPIRED
+}
+
+// ============================================================================
+// Access Request Model
+// ============================================================================
+model AccessRequest {
+  id                  String           @id @default(uuid())
+  companyId           String           @map("company_id")
+  company             Company          @relation(fields: [companyId], references: [id], onDelete: Cascade)
+  requestedByUserId   String           @map("requested_by")
+  requestedBy         User             @relation(fields: [requestedByUserId], references: [id])
+  
+  permissionLevel     PermissionLevel  @map("permission_level")
+  reason              String?
+  
+  status              RequestStatus    @default(PENDING)
+  
+  reviewedByUserId    String?          @map("reviewed_by")
+  reviewedAt          DateTime?        @map("reviewed_at")
+  responseNote        String?          @map("response_note")
+  
+  createdAt           DateTime         @default(now()) @map("created_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
+  
+  @@index([companyId])
+  @@index([requestedByUserId])
+  @@index([status])
+  @@map("access_requests")
+}
+
+enum RequestStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+// ============================================================================
+// Comment Model
+// ============================================================================
+model Comment {
+  id                  String           @id @default(uuid())
+  
+  commentableType     CommentableType  @map("commentable_type")
+  commentableId       String           @map("commentable_id")
+  
+  content             String
+  parentCommentId     String?          @map("parent_comment_id")
+  parentComment       Comment?         @relation("CommentReplies", fields: [parentCommentId], references: [id], onDelete: Cascade)
+  replies             Comment[]        @relation("CommentReplies")
+  
+  resolved            Boolean          @default(false)
+  resolvedAt          DateTime?        @map("resolved_at")
+  
+  mentionedUsers      String[]         @map("mentioned_users")
+  attachments         Json?
+  
+  createdAt           DateTime         @default(now()) @map("created_at")
+  updatedAt           DateTime         @updatedAt @map("updated_at")
+  
+  createdById         String           @map("created_by")
+  createdBy           User             @relation("CommentAuthor", fields: [createdById], references: [id])
+  
+  @@index([commentableType, commentableId])
+  @@index([createdById])
+  @@map("comments")
+}
+
+enum CommentableType {
+  COMPANY
+  DOCUMENT
+}
+
+// ============================================================================
+// Notification Model
+// ============================================================================
+model Notification {
+  id                  String           @id @default(uuid())
+  userId              String           @map("user_id")
+  user                User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  type                String
+  title               String
+  message             String
+  
+  referenceType       String?          @map("reference_type")
+  referenceId         String?          @map("reference_id")
+  
+  read                Boolean          @default(false)
+  readAt              DateTime?        @map("read_at")
+  
+  sentEmail           Boolean          @default(false) @map("sent_email")
+  sentSms             Boolean          @default(false) @map("sent_sms")
+  sentPush            Boolean          @default(false) @map("sent_push")
+  
+  data                Json?
+  
+  createdAt           DateTime         @default(now()) @map("created_at")
+  expiresAt           DateTime?        @map("expires_at")
+  
+  @@index([userId])
+  @@index([userId, read])
+  @@index([type])
+  @@map("notifications")
+}
+
+// ============================================================================
+// Session Model
+// ============================================================================
+model Session {
+  id                  String           @id @default(uuid())
+  userId              String           @map("user_id")
+  user                User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  refreshToken        String           @unique @map("refresh_token")
+  
+  ipAddress           String?          @map("ip_address")
+  userAgent           String?          @map("user_agent")
+  deviceName          String?          @map("device_name")
+  
+  isActive            Boolean          @default(true) @map("is_active")
+  
+  createdAt           DateTime         @default(now()) @map("created_at")
+  expiresAt           DateTime         @map("expires_at")
+  lastUsedAt          DateTime         @default(now()) @map("last_used_at")
+  
+  @@index([userId])
+  @@index([refreshToken])
+  @@index([isActive])
+  @@map("sessions")
+}
+
+// ============================================================================
+// Audit Log Model
+// ============================================================================
+model AuditLog {
+  id                  String           @id @default(uuid())
+  
+  userId              String?          @map("user_id")
+  user                User?            @relation(fields: [userId], references: [id])
+  action              String
+  
+  resourceType        String           @map("resource_type")
+  resourceId          String?          @map("resource_id")
+  
+  ipAddress           String?          @map("ip_address")
+  userAgent           String?          @map("user_agent")
+  
+  status              AuditStatus
+  
+  details             Json?
+  oldValues           Json?            @map("old_values")
+  newValues           Json?            @map("new_values")
+  
+  createdAt           DateTime         @default(now()) @map("created_at")
+  
+  @@index([userId])
+  @@index([action])
+  @@index([resourceType, resourceId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
+
+enum AuditStatus {
+  SUCCESS
+  FAILURE
+  ERROR
+}
+
+// ============================================================================
+// Download Token Model (One-Time Use)
+// ============================================================================
+model DownloadToken {
+  id          String    @id @default(uuid())
+  token       String    @unique
+  
+  documentId  String    @map("document_id")
+  document    Document  @relation(fields: [documentId], references: [id], onDelete: Cascade)
+  
+  userId      String    @map("user_id")
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  
+  purpose     TokenPurpose // PREVIEW or DOWNLOAD
+  
+  used        Boolean   @default(false)
+  usedAt      DateTime? @map("used_at")
+  
+  expiresAt   DateTime  @map("expires_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+  
+  ipAddress   String?   @map("ip_address")
+  userAgent   String?   @map("user_agent")
+  
+  @@index([token])
+  @@index([documentId])
+  @@index([userId])
+  @@index([expiresAt])
+  @@map("download_tokens")
+}
+
+enum TokenPurpose {
+  PREVIEW
+  DOWNLOAD
+}
+
