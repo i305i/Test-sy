@@ -11,7 +11,8 @@ const ALLOWED_BACKEND_URLS: string[] = [
   'http://localhost:3001',
   'http://127.0.0.1:5000',
   'http://127.0.0.1:3001',
-  // Add production URLs here
+  'http://93.127.160.182:5000',
+  'http://93.127.160.182',
   process.env.NEXT_PUBLIC_API_URL?.replace('/api/v1', ''),
 ].filter((url): url is string => Boolean(url));
 
