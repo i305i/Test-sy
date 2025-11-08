@@ -6,14 +6,14 @@ const RATE_LIMIT = 100; // 10 requests per window
 const RATE_LIMIT_WINDOW = 60000; // 1 minute
 
 // Whitelist of allowed backend URLs (SSRF Protection)
-const ALLOWED_BACKEND_URLS = [
+const ALLOWED_BACKEND_URLS: string[] = [
   'http://localhost:5000',
   'http://localhost:3001',
   'http://127.0.0.1:5000',
   'http://127.0.0.1:3001',
   // Add production URLs here
   process.env.NEXT_PUBLIC_API_URL?.replace('/api/v1', ''),
-].filter(Boolean);
+].filter((url): url is string => Boolean(url));
 
 function getRateLimitKey(request: NextRequest): string {
   // Use IP address for rate limiting
@@ -45,7 +45,7 @@ function validateBackendUrl(url: string): boolean {
     const urlObj = new URL(url);
     const baseUrl = `${urlObj.protocol}//${urlObj.host}`;
     return ALLOWED_BACKEND_URLS.some(allowed => 
-      baseUrl === allowed || baseUrl.startsWith(allowed)
+      allowed && (baseUrl === allowed || baseUrl.startsWith(allowed))
     );
   } catch {
     return false;
