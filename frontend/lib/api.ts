@@ -449,7 +449,7 @@ class ApiClient {
 
   // Users
   async getUsers(params?: PaginationParams & { role?: string; search?: string; status?: string }): Promise<PaginatedResponse<any>> {
-    const response = await this.client.get<ApiResponse<PaginatedResponse<any>>>('/users', {
+    const response = await this.client.get<ApiResponse<{ users: any[]; pagination: any }>>('/users', {
       params,
     });
     const backendData = response.data.data;
@@ -486,7 +486,7 @@ class ApiClient {
   }
 
   async getUserActivities(userId: string, params?: PaginationParams): Promise<PaginatedResponse<any>> {
-    const response = await this.client.get<ApiResponse<PaginatedResponse<any>>>(`/users/${userId}/activities`, {
+    const response = await this.client.get<ApiResponse<{ activities: any[]; pagination: any }>>(`/users/${userId}/activities`, {
       params,
     });
     const backendData = response.data.data;
