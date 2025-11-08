@@ -37,6 +37,7 @@ export interface Company {
   _count: {
     documents: number;
     shares: number;
+    folders: number;
   };
   createdAt: string;
   updatedAt: string;
