@@ -92,8 +92,10 @@ export class OnlyOfficeService {
 
     // Get file URL - OnlyOffice needs a direct download URL
     // We'll use the download token system for security
+    const token = crypto.randomBytes(32).toString('hex');
     const downloadToken = await this.prisma.downloadToken.create({
       data: {
+        token,
         documentId: document.id,
         userId: userId,
         purpose: 'PREVIEW',
@@ -107,7 +109,7 @@ export class OnlyOfficeService {
       this.configService.get('APP_URL') || 
       'http://localhost:5000';
     
-    const fileUrl = `${backendUrl}/api/v1/documents/download/${downloadToken.id}`;
+    const fileUrl = `${backendUrl}/api/v1/documents/download/${downloadToken.token}`;
     
     // Generate document key (unique identifier for OnlyOffice)
     const documentKey = `${documentId}_${document.updatedAt.getTime()}`;
