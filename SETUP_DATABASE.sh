@@ -23,7 +23,35 @@ if ! docker ps | grep -q company-docs-backend; then
     exit 1
 fi
 
-echo "⏳ انتظار بدء Backend (30 ثانية)..."
+echo "⏳ انتظار بدء Backend..."
+echo "   (قد يستغرق وقتاً أطول في المرة الأولى لتثبيت المكتبات)"
+
+# الانتظار حتى تبدأ الحاوية بشكل صحيح
+MAX_ATTEMPTS=30
+ATTEMPT=0
+while [ $ATTEMPT -lt $MAX_ATTEMPTS ]; do
+    if docker exec company-docs-backend echo "test" > /dev/null 2>&1; then
+        echo "✅ Backend بدأ بنجاح"
+        break
+    fi
+    ATTEMPT=$((ATTEMPT + 1))
+    echo "   محاولة $ATTEMPT/$MAX_ATTEMPTS..."
+    sleep 5
+done
+
+if [ $ATTEMPT -eq $MAX_ATTEMPTS ]; then
+    echo "⚠️  Backend لم يبدأ بعد، جاري التحقق من السجلات..."
+    docker compose logs --tail=30 backend
+    echo ""
+    echo "💡 قد تحتاج إلى:"
+    echo "   1. التحقق من ملف backend/.env"
+    echo "   2. انتظار اكتمال تثبيت المكتبات"
+    echo "   3. عرض السجلات: docker compose logs -f backend"
+    exit 1
+fi
+
+# الانتظار قليلاً للتأكد من اكتمال التثبيت
+echo "⏳ انتظار اكتمال تثبيت المكتبات (30 ثانية)..."
 sleep 30
 
 echo "📦 توليد Prisma Client..."

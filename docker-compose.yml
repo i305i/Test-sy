@@ -162,9 +162,13 @@ services:
       - company-docs-network
     entrypoint: >
       /bin/sh -c "
-      if [ ! -d node_modules ]; then
-        echo 'Installing backend dependencies...';
+      echo 'Checking node_modules...';
+      if [ ! -d node_modules ] || [ ! -f node_modules/.bin/nest ]; then
+        echo 'Installing backend dependencies (this may take 5-10 minutes)...';
         npm install;
+        echo 'Dependencies installed successfully!';
+      else
+        echo 'Dependencies already installed';
       fi;
       echo 'Starting backend...';
       npm run start:dev;
