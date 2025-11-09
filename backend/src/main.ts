@@ -13,9 +13,22 @@ async function bootstrap() {
   // Global Prefix
   app.setGlobalPrefix('api/v1');
 
-  // CORS
+  // CORS - Allow multiple origins
+  const allowedOrigins = process.env.FRONTEND_URL 
+    ? process.env.FRONTEND_URL.split(',').map(url => url.trim())
+    : ['http://localhost:3000', 'http://93.127.160.182', 'http://93.127.160.182:3000'];
+  
   app.enableCors({
-    origin: process.env.FRONTEND_URL || 'http://localhost:3000',
+    origin: (origin, callback) => {
+      // Allow requests with no origin (like mobile apps or curl requests)
+      if (!origin) return callback(null, true);
+      
+      if (allowedOrigins.indexOf(origin) !== -1 || process.env.NODE_ENV === 'development') {
+        callback(null, true);
+      } else {
+        callback(new Error('Not allowed by CORS'));
+      }
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization'],
@@ -76,10 +89,11 @@ async function bootstrap() {
 
   // Start Server
   const port = process.env.PORT || 5000;
-  await app.listen(port);
+  const host = process.env.HOST || '0.0.0.0'; // Listen on all interfaces
+  await app.listen(port, host);
   
-  logger.log(`🚀 Application is running on: http://localhost:${port}`);
-  logger.log(`📚 API Documentation: http://localhost:${port}/api-docs`);
+  logger.log(`🚀 Application is running on: http://${host}:${port}`);
+  logger.log(`📚 API Documentation: http://${host}:${port}/api-docs`);
   logger.log(`🌍 Environment: ${process.env.NODE_ENV || 'development'}`);
 }
 
