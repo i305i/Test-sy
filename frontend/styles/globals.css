@@ -18,8 +18,8 @@ body {
 }
 
 html.dark body {
-  background-color: white;
-  color: #111827;
+  background-color: #111827;
+  color: #f9fafb;
 }
 
 /* RTL Support */

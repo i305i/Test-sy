@@ -37,7 +37,7 @@ export default function DashboardLayout({
 
   if (!isAuthenticated) {
     return (
-      <div className="min-h-screen flex items-center justify-center bg-white">
+      <div className="min-h-screen flex items-center justify-center bg-gray-50">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
           <p className="mt-4 text-gray-600">جاري التحميل...</p>
@@ -47,7 +47,7 @@ export default function DashboardLayout({
   }
 
   return (
-    <div className="min-h-screen bg-white">
+    <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
       <div className="flex h-screen overflow-hidden">
         {/* Sidebar */}
         <Sidebar />
@@ -58,7 +58,7 @@ export default function DashboardLayout({
           <Header />
           
           {/* Main Content Area */}
-          <main className="flex-1 overflow-y-auto bg-white">
+          <main className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900">
             <div className="container mx-auto px-6 py-8">
               {children}
             </div>
