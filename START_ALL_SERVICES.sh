@@ -30,29 +30,22 @@ else
     DOCKER_COMPOSE="docker-compose"
 fi
 
-echo "📦 تشغيل الخدمات الأساسية (PostgreSQL, Redis, MinIO)..."
-$DOCKER_COMPOSE up -d postgres redis minio minio-client
+echo "📦 تشغيل جميع الخدمات دفعة واحدة..."
+echo "   - PostgreSQL (قاعدة البيانات)"
+echo "   - Redis (التخزين المؤقت)"
+echo "   - MinIO (تخزين الملفات)"
+echo "   - OnlyOffice (محرر المستندات)"
+echo "   - Backend (API Server)"
+echo "   - Frontend (واجهة المستخدم)"
+echo ""
 
-echo "⏳ انتظار بدء الخدمات الأساسية (30 ثانية)..."
-sleep 30
+# تشغيل جميع الخدمات دفعة واحدة
+$DOCKER_COMPOSE up -d
 
-echo "📄 تشغيل OnlyOffice..."
-$DOCKER_COMPOSE up -d onlyoffice
-
-echo "⏳ انتظار بدء OnlyOffice (15 ثانية)..."
-sleep 15
-
-echo "🔧 تشغيل Backend..."
-$DOCKER_COMPOSE up -d backend
-
-echo "⏳ انتظار بدء Backend (20 ثانية)..."
-sleep 20
-
-echo "🎨 تشغيل Frontend..."
-$DOCKER_COMPOSE up -d frontend
-
-echo "⏳ انتظار بدء Frontend (30 ثانية)..."
-sleep 30
+echo ""
+echo "⏳ انتظار بدء جميع الخدمات (60 ثانية)..."
+echo "   (قد يستغرق وقتاً أطول في المرة الأولى لتثبيت المكتبات)"
+sleep 60
 
 echo ""
 echo "=========================================="
@@ -98,6 +91,14 @@ echo "  - Frontend: http://localhost:3000"
 echo "  - Backend API: http://localhost:5000/api/v1"
 echo "  - OnlyOffice: http://localhost:8080"
 echo "  - MinIO Console: http://localhost:9001"
+echo ""
+echo "📋 الخدمات المشغلة:"
+echo "  ✅ PostgreSQL - قاعدة البيانات"
+echo "  ✅ Redis - التخزين المؤقت"
+echo "  ✅ MinIO - تخزين الملفات"
+echo "  ✅ OnlyOffice - محرر المستندات"
+echo "  ✅ Backend - API Server"
+echo "  ✅ Frontend - واجهة المستخدم"
 echo ""
 echo "📝 الخطوات التالية:"
 echo "  1. انتظر حتى تبدأ جميع الخدمات (قد يستغرق دقيقة أو دقيقتين)"
