@@ -8,12 +8,25 @@ set -e
 echo "🛑 إيقاف الخدمات الموجودة..."
 echo ""
 
-# إيقاف MinIO
+# إيقاف MinIO من systemd
+if systemctl is-active --quiet minio 2>/dev/null; then
+    echo "🛑 إيقاف خدمة MinIO من systemd..."
+    systemctl stop minio
+    systemctl disable minio
+    echo "✅ تم إيقاف وتعطيل خدمة MinIO"
+elif systemctl is-active --quiet minio-server 2>/dev/null; then
+    echo "🛑 إيقاف خدمة MinIO Server من systemd..."
+    systemctl stop minio-server
+    systemctl disable minio-server
+    echo "✅ تم إيقاف وتعطيل خدمة MinIO Server"
+fi
+
+# إيقاف أي عمليات MinIO تعمل
 if pgrep -f minio > /dev/null; then
-    echo "🛑 إيقاف MinIO..."
+    echo "🛑 إيقاف عمليات MinIO..."
     pkill -9 minio || killall -9 minio || true
     sleep 2
-    echo "✅ تم إيقاف MinIO"
+    echo "✅ تم إيقاف عمليات MinIO"
 fi
 
 # إيقاف PostgreSQL إذا كان يعمل كخدمة نظام
