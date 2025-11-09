@@ -75,3 +75,53 @@ export function formatDate(date: string): string {
   return d.toLocaleDateString('ar-SA', { year: 'numeric', month: 'long', day: 'numeric' });
 }
 
+/**
+ * Check if file type is supported by OnlyOffice
+ */
+export function isOnlyOfficeSupported(mimeType: string): boolean {
+  const supportedTypes = [
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document', // .docx
+    'application/msword', // .doc
+    'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', // .xlsx
+    'application/vnd.ms-excel', // .xls
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation', // .pptx
+    'application/vnd.ms-powerpoint', // .ppt
+    'application/pdf', // .pdf
+    'text/plain', // .txt
+    'text/csv', // .csv
+  ];
+
+  return supportedTypes.includes(mimeType);
+}
+
+/**
+ * Check if user can edit document
+ */
+export function canEditDocument(document: any, userId: string, userRole: string): boolean {
+  // Admin and Supervisor can always edit
+  if (userRole === 'ADMIN' || userRole === 'SUPERVISOR') {
+    return true;
+  }
+
+  // Owner can edit
+  if (document.company?.ownerId === userId) {
+    return true;
+  }
+
+  // Uploader can edit
+  if (document.uploadedById === userId) {
+    return true;
+  }
+
+  // Check if user has EDIT or MANAGE permission through share
+  const share = document.company?.shares?.find(
+    (s: any) => s.sharedWithUserId === userId && s.status === 'ACTIVE',
+  );
+
+  if (share && (share.permissionLevel === 'EDIT' || share.permissionLevel === 'MANAGE')) {
+    return true;
+  }
+
+  return false;
+}
+

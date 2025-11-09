@@ -575,6 +575,14 @@ class ApiClient {
   async delete(url: string): Promise<void> {
     await this.client.delete(url);
   }
+
+  // OnlyOffice
+  async getOnlyOfficeConfig(documentId: string, mode: 'edit' | 'view' = 'edit'): Promise<any> {
+    const response = await this.client.get<ApiResponse>(`/onlyoffice/config/${documentId}`, {
+      params: { mode },
+    });
+    return response.data.data;
+  }
 }
 
 export const apiClient = new ApiClient();

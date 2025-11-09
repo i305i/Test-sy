@@ -5,8 +5,9 @@ import apiClient from '@/lib/api';
 import { LoadingSpinner, useToast } from '@/components/common';
 import { UploadDocumentModal } from './UploadDocumentModal';
 import { DocumentPreviewModal } from './DocumentPreviewModal';
+import { OnlyOfficeEditor } from './OnlyOfficeEditor';
 import { FileIcon } from './FileIcon';
-import { getFileTypeLabel, getFileColor, formatFileSize, formatDate } from '@/lib/file-utils';
+import { getFileTypeLabel, getFileColor, formatFileSize, formatDate, isOnlyOfficeSupported, canEditDocument } from '@/lib/file-utils';
 import { useAuthStore } from '@/store';
 
 interface FileExplorerProps {
@@ -36,6 +37,7 @@ export function FileExplorer({ companyId, companyName, initialFolderId = null }:
   const [selectedEmployeeId, setSelectedEmployeeId] = useState('');
   const [permissionLevel, setPermissionLevel] = useState('VIEW');
   const [isSharing, setIsSharing] = useState(false);
+  const [editingDocument, setEditingDocument] = useState<any | null>(null);
 
   useEffect(() => {
     fetchFolderContents();
@@ -211,6 +213,21 @@ export function FileExplorer({ companyId, companyName, initialFolderId = null }:
 
   const handleDocumentPreview = (document: any) => {
     setPreviewDocument(document);
+  };
+
+  const handleEditDocument = (document: any) => {
+    // Check if file is supported and user can edit
+    if (!isOnlyOfficeSupported(document.mimeType)) {
+      showToast('نوع الملف غير مدعوم للتحرير', 'error');
+      return;
+    }
+
+    if (!canEditDocument(document, currentUser?.id || '', currentUser?.role || '')) {
+      showToast('ليس لديك صلاحية لتعديل هذا المستند', 'error');
+      return;
+    }
+
+    setEditingDocument(document);
   };
 
   const handleDocumentDownload = async (doc: any) => {
@@ -498,6 +515,20 @@ export function FileExplorer({ companyId, companyName, initialFolderId = null }:
                         </svg>
                       </button>
                     )}
+                    {isOnlyOfficeSupported(doc.mimeType) && canEditDocument(doc, currentUser?.id || '', currentUser?.role || '') && (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          handleEditDocument(doc);
+                        }}
+                        className="p-1.5 bg-indigo-100 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 rounded-lg hover:bg-indigo-200 dark:hover:bg-indigo-900/50 transition-colors"
+                        title="تحرير"
+                      >
+                        <svg className="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                          <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M11 5H6a2 2 0 00-2 2v11a2 2 0 002 2h11a2 2 0 002-2v-5m-1.414-9.414a2 2 0 112.828 2.828L11.828 15H9v-2.828l8.586-8.586z" />
+                        </svg>
+                      </button>
+                    )}
                     <button
                       onClick={(e) => {
                         e.stopPropagation();
@@ -637,6 +668,17 @@ export function FileExplorer({ companyId, companyName, initialFolderId = null }:
                             مشاركة
                           </button>
                         )}
+                        {isOnlyOfficeSupported(doc.mimeType) && canEditDocument(doc, currentUser?.id || '', currentUser?.role || '') && (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleEditDocument(doc);
+                            }}
+                            className="text-indigo-600 dark:text-indigo-400 hover:text-indigo-700 dark:hover:text-indigo-300"
+                          >
+                            تحرير
+                          </button>
+                        )}
                         <button
                           onClick={(e) => {
                             e.stopPropagation();
@@ -706,6 +748,25 @@ export function FileExplorer({ companyId, companyName, initialFolderId = null }:
           onClose={() => setPreviewDocument(null)}
           document={previewDocument}
         />
+      )}
+
+      {/* OnlyOffice Editor Modal */}
+      {editingDocument && (
+        <div className="fixed inset-0 z-50 bg-black/50 backdrop-blur-sm flex items-center justify-center p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl w-full max-w-7xl h-[90vh] flex flex-col">
+            <OnlyOfficeEditor
+              documentId={editingDocument.id}
+              mode="edit"
+              onClose={() => {
+                setEditingDocument(null);
+                fetchFolderContents(); // Refresh to show updated document
+              }}
+              onSave={() => {
+                fetchFolderContents(); // Refresh after save
+              }}
+            />
+          </div>
+        </div>
       )}
 
       {/* Share Document Modal */}

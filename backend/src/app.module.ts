@@ -19,6 +19,7 @@ import { FoldersModule } from './modules/folders/folders.module';
 import { SharesModule } from './modules/shares/shares.module';
 import { NotificationsModule } from './modules/notifications/notifications.module';
 import { DashboardModule } from './modules/dashboard/dashboard.module';
+import { OnlyOfficeModule } from './modules/onlyoffice/onlyoffice.module';
 
 // App Controller & Service
 import { AppController } from './app.controller';
@@ -57,6 +58,7 @@ import { AppService } from './app.service';
     SharesModule,
     NotificationsModule,
     DashboardModule,
+    OnlyOfficeModule,
   ],
   controllers: [AppController],
   providers: [
